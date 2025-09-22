@@ -20,6 +20,7 @@ def send_powers():
         echo = s.recv(4)
         print("sent:", list(data), " echo:", list(echo))
 
-set_motors()
-send_powers()
+for i in range(20):
+    set_motors()
+    send_powers()
 
