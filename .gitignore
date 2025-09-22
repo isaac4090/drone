@@ -1,0 +1,16 @@
+# PlatformIO build
+.pio/
+.pioenvs/
+.build/
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python venv (if you play with scripts)
+venv/
+*.pyc
+__pycache__/
