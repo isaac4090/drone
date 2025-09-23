@@ -1,9 +1,12 @@
 import socket, time,sys
 from enum import Enum
-
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtNetwork import QTcpSocket,QAbstractSocket
+import struct, math
+
+PACKET_LEN = 18
+A_SENS = 16384.0  # MPU9250/MPU6050 accel LSB/g (adjust if different)
 
 HOST_DEFAULT = "192.168.4.1"
 PORT_DEFAULT = 2323
@@ -372,6 +375,8 @@ class drone_UI(QtWidgets.QMainWindow):
         self.btnConnect.setText("Connecting...")
         self.btnConnect.setStyleSheet("QPushButton { background-color: orange; color: white; }")
         self.s = QTcpSocket(self)
+        self.rxbuf = bytearray()
+        self.s.readyRead.connect(self._on_ready_read)
         self.s.connected.connect(lambda: (
             self.btnConnect.setText("Connected!"),
             self.btnConnect.setStyleSheet("QPushButton { background: green; color: white; }"),
@@ -380,8 +385,7 @@ class drone_UI(QtWidgets.QMainWindow):
             self.btnStartMotors.setEnabled(True),
             self.btnStopMotors.setEnabled(True), 
             self.btnFlyPS4.setEnabled(True),
-            self.btnFlyKeyboard.setEnabled(True) 
-          
+            self.btnFlyKeyboard.setEnabled(True)
         ))
         self.s.errorOccurred.connect(lambda e: (
             self.btnConnect.setText("Connection failed, try again?"),
@@ -565,7 +569,41 @@ class drone_UI(QtWidgets.QMainWindow):
                 self.MotorPowers[m] = pwr
         self.send_powers()
 
+    def _on_ready_read(self):
+        # accumulate bytes
+        self.rxbuf.extend(self.s.readAll().data())
+        # process whole frames
+        while len(self.rxbuf) >= PACKET_LEN:
+            frame = bytes(self.rxbuf[:PACKET_LEN])
+            del self.rxbuf[:PACKET_LEN]
+            self._handle_frame(frame)
 
+
+    def _handle_frame(self, frame: bytes):
+        # 0..3: motor bytes, 4..17: IMU payload (14 bytes)
+        m0, m1, m2, m3 = frame[0], frame[1], frame[2], frame[3]
+        # Update RX numbers + bars
+        try:
+            order = self.order  # ('FrontLeft','FrontRight','BackLeft','BackRight')
+        except AttributeError:
+            order = ('FrontLeft','FrontRight','BackLeft','BackRight')
+        for name, val in zip(order, (m0, m1, m2, m3)):
+            if hasattr(self, "rxLabels"):   self.rxLabels[name].setText(str(val))
+            if hasattr(self, "barPairs"):   self.barPairs[name].setRX(val)
+
+        imu = frame[4:18]  # 14 bytes
+        # 7 big-endian int16: ax, ay, az, gx, gy, gz, temp(or spare)
+        try:
+            ax, ay, az, gx, gy, gz, _ = struct.unpack(">7h", imu)
+        except struct.error:
+            return
+        ax_g, ay_g, az_g = ax / A_SENS, ay / A_SENS, az / A_SENS
+        # normalize to unit vector and update ball
+        gmag = math.sqrt(ax_g*ax_g + ay_g*ay_g + az_g*az_g) or 1.0
+        x = ax_g / gmag
+        y = ay_g / gmag
+        if hasattr(self, "tiltBall"):
+            self.tiltBall.set_xy(x, y)
 
 def main(secondMonitor:bool = False):
     app = QtWidgets.QApplication(sys.argv)

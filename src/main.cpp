@@ -21,7 +21,10 @@ WiFiClient client;
 struct Packet {uint8_t us[4];};
 
 struct MotorPowers {uint8_t m[4];}; //FL,FR,BL,BR
+
+uint8_t mFL=0, mFR=0, mBL=0, mBR=0; //latest motors
 Servo motorFL, motorFR, motorBL, motorBR;
+uint32_t lastTxMs = 0;
 
 void setup_motors(){
 
@@ -125,29 +128,31 @@ void loop() {
 
   if (client.available() >= (int)sizeof(Packet)) {
     Packet p;
-    client.read((uint8_t*)&p, sizeof(p));  // read 8 bytes
-    if (prints::printSerial) Serial.printf("pkt: [%u %u %u %u]\n", p.us[0], p.us[1], p.us[2], p.us[3]);
-    client.write((const uint8_t*)&p, sizeof(p)); // echo back
-    if (prints::printSerial){
-      Serial.print("    FL power: ");
-      Serial.print(p.us[0]);
-      Serial.print("    FR power:  ");
-      Serial.print(p.us[1]);
-      Serial.print("    BL power:  ");
-      Serial.print(p.us[2]);
-      Serial.print("     FR power :  ");
-      Serial.println(p.us[3]);
+    size_t got = client.read((uint8_t*)&p, sizeof(p));  // read 8 bytes
+    if (got == sizeof(p)){
+      mFL = p.us[0]; mFR = p.us[1]; mBL = p.us[2]; mBR = p.us[3];
+      if (prints::printSerial) Serial.printf("FL: %u, FR: %u, BL: %u, BR %u \n", mFL, mFR, mBL, mBR);
+      motorFL.write(mFL);
+      motorFR.write(mFR);
+      motorBL.write(mBL);
+      motorBR.write(mBR);
     }
-    motorBL.write(p.us[0]);
-    motorFL.write(p.us[1]);
-    motorBR.write(p.us[2]);
-    motorFR.write(p.us[3]);
   }
   
-  //////////////////////////////////
-  // uint8_t raw[14];
-  // mpuReadN(REG_ACCEL_XOUT_H, raw, sizeof(raw));
-  // client.write(raw, sizeof(raw));
-  
-  /////////////////////
+  uint32_t now = millis();
+  if (now - lastTxMs >= 10) {           // 10 ms = 100 Hz
+    lastTxMs = now;
+
+    // read 14 bytes starting at ACCEL_XOUT_H (ax,ay,az,temp,gx,gy,gz)
+    uint8_t raw14[14];
+    mpuReadN(REG_ACCEL_XOUT_H, raw14, sizeof(raw14));
+
+    // build 18-byte frame: 4 motors + 14 IMU bytes
+    uint8_t frame[18];
+    frame[0]=mFL; frame[1]=mFR; frame[2]=mBL; frame[3]=mBR;
+    memcpy(frame+4, raw14, 14);
+
+    client.write(frame, sizeof(frame)); // one complete frame
+    // client.flush(); // optional
+  }
 }

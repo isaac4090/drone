@@ -3,10 +3,10 @@
 
 // Define pins for a motor controller
 
-constexpr int motorFLpin = 27; 
-constexpr int motorFRpin = 14; 
-constexpr int motorBLpin = 33;
-constexpr int motorBRpin = 12; 
+constexpr int motorFLpin = 33; //33
+constexpr int motorFRpin = 27;  //27
+constexpr int motorBLpin = 12;  //12
+constexpr int motorBRpin = 14;  //14
 
 
 // max power
