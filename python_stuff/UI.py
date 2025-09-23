@@ -1,7 +1,7 @@
 import socket, time,sys
 from enum import Enum
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtNetwork import QTcpSocket,QAbstractSocket
 
@@ -18,6 +18,72 @@ class mode(Enum):
 
 ## pin23 voltage from battery on divider
 
+class TiltBall(QtWidgets.QWidget):
+    """Unit circle with a dot at (x,y) where x,y ∈ [-1,1]."""
+    def __init__(self, diameter=220, parent=None):
+        super().__init__(parent)
+        self._x = 0.0
+        self._y = 0.0
+        self._pad = 12
+        self.setFixedSize(diameter, diameter)
+
+    def set_xy(self, x: float, y: float):
+        # clamp to [-1,1]
+        x = max(-1.0, min(1.0, float(x)))
+        y = max(-1.0, min(1.0, float(y)))
+        if x != self._x or y != self._y:
+            self._x, self._y = x, y
+            self.update()
+
+    # optional: convenience from accelerometer in g's
+    def set_from_g(self, ax_g: float, ay_g: float, az_g: float):
+        g = (ax_g*ax_g + ay_g*ay_g + az_g*az_g) ** 0.5 or 1.0
+        self.set_xy(ax_g / g, ay_g / g)
+
+    def paintEvent(self, ev):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+
+        r = self.rect().adjusted(self._pad, self._pad, -self._pad, -self._pad)
+        center = QtCore.QPointF(r.center())
+        radius = min(r.width(), r.height()) / 2.0
+
+        # background
+        p.fillRect(self.rect(), QtGui.QColor("#ffffff"))
+
+        # grid cross
+        pen_grid = QtGui.QPen(QtGui.QColor("#d0d0d0"), 1)
+        p.setPen(pen_grid)
+        p.drawLine(int(center.x()), r.top(), int(center.x()), r.bottom())
+        p.drawLine(r.left(), int(center.y()), r.right(), int(center.y()))
+
+        # unit circle
+        pen_circle = QtGui.QPen(QtGui.QColor("#888"), 2)
+        p.setPen(pen_circle)
+        p.drawEllipse(center, radius, radius)
+
+        # ball
+        px = center.x() + self._x * radius
+        py = center.y() - self._y * radius  # invert Y for screen coords
+        dot_r = 8
+        p.setBrush(QtGui.QBrush(QtGui.QColor("#2e8b57")))
+        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.drawEllipse(QtCore.QPointF(px, py), dot_r, dot_r)
+
+        # axis ticks (optional)
+        p.setPen(QtGui.QPen(QtGui.QColor("#bbb"), 1))
+        for t in (-0.5, 0.5):
+            p.drawLine(int(center.x() + t*radius), int(center.y()-4),
+                       int(center.x() + t*radius), int(center.y()+4))
+            p.drawLine(int(center.x()-4), int(center.y() - t*radius),
+                       int(center.x()+4), int(center.y() - t*radius))
+
+        # text
+        p.setPen(QtGui.QPen(QtGui.QColor("#666")))
+        p.drawText(self.rect().adjusted(4, 4, -4, -4),
+                   QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft,
+                   f"x={self._x:+.2f}  y={self._y:+.2f}")
+        p.end()
 
 class KeyPill(QtWidgets.QLabel):
     def __init__(self, text: str, parent=None):
@@ -49,7 +115,34 @@ class KeyPill(QtWidgets.QLabel):
               border-radius: 18px;
               padding: 6px 12px;
             }"""
-    
+
+class BarPair(QtWidgets.QWidget):
+    """Two vertical bars (TX | RX) for a single motor."""
+    def __init__(self, max_value=255,bar_w=56, bar_h=140, parent=None):
+        super().__init__(parent)
+        self.tx = QtWidgets.QProgressBar(); self.tx.setOrientation(QtCore.Qt.Orientation.Vertical)
+        self.rx = QtWidgets.QProgressBar(); self.rx.setOrientation(QtCore.Qt.Orientation.Vertical)
+        for bar in (self.tx, self.rx):
+            bar.setRange(0, max_value)
+            bar.setTextVisible(False)
+            bar.setFixedSize(bar_w, bar_h)
+            bar.setStyleSheet("""
+                QProgressBar { background:#eee; border:1px solid #ccc; border-radius:3px; }
+                QProgressBar::chunk { background:#2e8b57; }
+            """)
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(0,0,0,0); lay.setSpacing(6)
+        lay.addWidget(self.tx); lay.addWidget(self.rx)
+
+    def setMax(self, m: int):
+        self.tx.setRange(0, m); self.rx.setRange(0, m)
+
+    def setTX(self, v: int):
+        self.tx.setValue(max(0, min(self.tx.maximum(), int(v))))
+
+    def setRX(self, v: int):
+        self.rx.setValue(max(0, min(self.rx.maximum(), int(v))))
+
 # ---- A triangle layout: apex on top row center, 3-key base on second row ----
 def triangle_widget(apex: QtWidgets.QWidget, base_left: QtWidgets.QWidget,
                     base_center: QtWidgets.QWidget, base_right: QtWidgets.QWidget) -> QtWidgets.QWidget:
@@ -66,7 +159,6 @@ def triangle_widget(apex: QtWidgets.QWidget, base_left: QtWidgets.QWidget,
     for c in range(3): g.setColumnStretch(c, 1)
     for r in range(2): g.setRowStretch(r, 1)
     return w
-
 
 class drone_UI(QtWidgets.QMainWindow):
     def __init__(self):
@@ -139,7 +231,6 @@ class drone_UI(QtWidgets.QMainWindow):
         wasdLay = QtWidgets.QVBoxLayout(wasdBox)
         wasdLay.setContentsMargins(8, 8, 8, 8)
         wasdLay.addWidget(wasdTri)
-        #####
 
         # Right half of left column: Arrow triangle (↑ apex; ← ↓ → base)
         self.pillUp   = KeyPill("↑")
@@ -178,12 +269,6 @@ class drone_UI(QtWidgets.QMainWindow):
             QtCore.Qt.Key.Key_Right: self.pillRight,
         }
 
-
-        ####
-
-
-
-
         self.btnConnect.clicked.connect(self.on_connect_clicked)
         self.btnConnect.clicked.connect(self.on_disconnect_clicked)
         self.btnStartMotors.clicked.connect(self.on_start_clicked)
@@ -207,11 +292,64 @@ class drone_UI(QtWidgets.QMainWindow):
         rightLayout = QtWidgets.QVBoxLayout(right)
         rightLayout.setContentsMargins(16, 16, 16, 16)
         rightLayout.addStretch(1)
-        lbl = QtWidgets.QLabel("Right area (your plot / HUD / telemetry)")
-        lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("color:#666; font-size:16px;")
-        rightLayout.addWidget(lbl)
-        rightLayout.addStretch(1)
+
+        self.tiltBall = TiltBall(diameter=500)
+
+        # make sure it sits in the top-right corner
+        rightLayout.addWidget(self.tiltBall, 0, QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignRight)
+
+
+        self.order = ('FrontLeft','FrontRight','BackLeft','BackRight')
+
+        # bars row (TX|RX pair per motor)
+        self.barPairs, self.txLabels, self.rxLabels = {}, {}, {}
+        CELL_W, BAR_H = 120,400
+
+        ioBox = QtWidgets.QGroupBox("Motor I/O")
+        ioBox.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                            QtWidgets.QSizePolicy.Policy.Expanding)
+        ioGrid = QtWidgets.QGridLayout(ioBox)
+        ioGrid.setContentsMargins(0,10,10,10)
+        ioGrid.setHorizontalSpacing(18)
+        ioGrid.setVerticalSpacing(8)
+
+        # header row
+        ioGrid.addWidget(QtWidgets.QLabel(""), 0, 0)
+        for c, name in enumerate(self.order, start=1):
+            lab = QtWidgets.QLabel(name)
+            lab.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            lab.setStyleSheet("color:#555; font-weight:600;")
+            ioGrid.addWidget(lab, 0, c)
+
+        # helper to make numeric "bubble"
+        def _mkCell():
+            lbl = QtWidgets.QLabel("0")
+            lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            lbl.setFixedWidth(CELL_W)  # <- match bar width
+            lbl.setStyleSheet("font-family: Consolas, monospace; font-size:14px; "
+                            "background:#f2f2f2; border-radius:6px; padding:4px 6px;")
+            return lbl
+
+        # one column per motor: bars (TX|RX) on top, numbers (TX RX) on one line below
+        for c, name in enumerate(self.order, start=1):
+            col = QtWidgets.QWidget()
+            v = QtWidgets.QVBoxLayout(col)
+            v.setContentsMargins(0,0,0,0); v.setSpacing(6)
+
+            bp = BarPair(self.fullPower, bar_w=CELL_W, bar_h=BAR_H)
+            self.barPairs[name] = bp
+            v.addWidget(bp, alignment=QtCore.Qt.AlignmentFlag.AlignHCenter)
+
+            rowNums = QtWidgets.QHBoxLayout(); rowNums.setSpacing(8)
+            tx = _mkCell(); rx = _mkCell()
+            self.txLabels[name] = tx; self.rxLabels[name] = rx
+            rowNums.addWidget(tx); rowNums.addWidget(rx)
+            v.addLayout(rowNums)
+
+            ioGrid.addWidget(col, 1, c, alignment=QtCore.Qt.AlignmentFlag.AlignHCenter)
+
+        # Put it at the bottom of the right column
+        rightLayout.addWidget(ioBox, 1)
 
         # Put both halves into the main layout; make right a bit wider
         root.addWidget(left, 1)
@@ -316,14 +454,15 @@ class drone_UI(QtWidgets.QMainWindow):
                         self.btnStartMotors.setText("Motors failed, restart UI")
                         self.btnStartMotors.setEnabled(False)
                         self.btnStartMotors.setStyleSheet("QPushButton { background: red; color: white; }")
-
-
         
     def send_powers(self):
         if not self.s or self.s.state() != QAbstractSocket.SocketState.ConnectedState:
             return
         data = bytes([self.MotorPowers[m] for m in self.MotorPowers])  # 4 bytes
         self.s.write(data)
+        for name, val in zip(self.order, data):
+            self.txLabels[name].setText(str(val))
+            self.barPairs[name].setTX(val)
 
     def on_stop_clicked(self):
         self.stopToggle = not self.stopToggle
@@ -341,15 +480,10 @@ class drone_UI(QtWidgets.QMainWindow):
             self.btnStopMotors.setText("Motors enabled, press to stop")
             self.btnStopMotors.setStyleSheet("QPushButton { background: green; color: white; }")
             self.btnFlyKeyboard.setEnabled(True)
-            self.btnFlyPS4.setEnabled(True)
-            
-        
-
-
+            self.btnFlyPS4.setEnabled(True)         
 
     def on_fly_ps4_clicked(self):
         pass
-
 
     def on_fly_keyboard_clicked(self):
         self.flyKeyboardToggle = not self.flyKeyboardToggle
