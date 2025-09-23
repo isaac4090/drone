@@ -36,5 +36,8 @@ static const int PIN_CS   = 5;
 #define REG_ACCEL_CONFIG2 0x1D
 #define REG_ACCEL_XOUT_H  0x3B  // 14 bytes: AccelX..AccelZ, Temp, GyroX..GyroZ
 
+// Battery read on divider
+static const int batPin = 23;
+
 
 #endif
