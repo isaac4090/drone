@@ -101,6 +101,7 @@ void setup_gyro(){
   }
 }
 
+
 ///////////////////////
 
 void setup() {
@@ -114,6 +115,10 @@ void setup() {
 
   /////////////////////////
   setup_gyro();
+
+  //// Battery setup
+  analogReadResolution(12);
+  analogSetPinAttenuation(34, ADC_11db);
   
 
 }
@@ -147,10 +152,14 @@ void loop() {
     uint8_t raw14[14];
     mpuReadN(REG_ACCEL_XOUT_H, raw14, sizeof(raw14));
 
+    // read battery
+    uint16_t bat = analogRead(34);
     // build 18-byte frame: 4 motors + 14 IMU bytes
-    uint8_t frame[18];
-    frame[0]=mFL; frame[1]=mFR; frame[2]=mBL; frame[3]=mBR;
-    memcpy(frame+4, raw14, 14);
+    uint8_t frame[20];
+    frame[0] = (bat >> 8) & 0xFF;
+    frame[1] = bat & 0xFF;
+    frame[2]=mFL; frame[3]=mFR; frame[4]=mBL; frame[5]=mBR;
+    memcpy(frame+6, raw14, 14);
 
     client.write(frame, sizeof(frame)); // one complete frame
     // client.flush(); // optional

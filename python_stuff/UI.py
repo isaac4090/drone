@@ -5,8 +5,9 @@ from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtNetwork import QTcpSocket,QAbstractSocket
 import struct, math
 
-PACKET_LEN = 18
+PACKET_LEN = 20
 A_SENS = 16384.0  # MPU9250/MPU6050 accel LSB/g (adjust if different)
+VBAT_RATIO = 13.21 # voltage max for battery should be 12.6V dont go below 10.5V absolute minimum 9V will fuck it 
 
 HOST_DEFAULT = "192.168.4.1"
 PORT_DEFAULT = 2323
@@ -146,7 +147,6 @@ class BarPair(QtWidgets.QWidget):
     def setRX(self, v: int):
         self.rx.setValue(max(0, min(self.rx.maximum(), int(v))))
 
-# ---- A triangle layout: apex on top row center, 3-key base on second row ----
 def triangle_widget(apex: QtWidgets.QWidget, base_left: QtWidgets.QWidget,
                     base_center: QtWidgets.QWidget, base_right: QtWidgets.QWidget) -> QtWidgets.QWidget:
     w = QtWidgets.QWidget()
@@ -162,6 +162,95 @@ def triangle_widget(apex: QtWidgets.QWidget, base_left: QtWidgets.QWidget,
     for c in range(3): g.setColumnStretch(c, 1)
     for r in range(2): g.setRowStretch(r, 1)
     return w
+
+class BatteryIndicator(QtWidgets.QWidget):
+    """
+    Battery symbol with percentage and voltage.
+    Call set_voltage(volts, cells=3) to update (percent auto-calculated).
+    """
+    def __init__(self, cells: int = 3, parent=None):
+        super().__init__(parent)
+        self._cells = cells
+        self._volts = 0.0
+        self._percent = 0.0
+        self._ema = None   # simple smoothing
+        self._ema_alpha = 0.15
+        self.setFixedSize(500, 120)
+        self.setToolTip("Battery")
+
+    # --- public API ---
+    def set_voltage(self, volts: float, cells: int | None = None):
+        if cells: self._cells = cells
+        # light smoothing so it doesn't jump around
+        v = float(volts)
+        self._ema = v if self._ema is None else (1-self._ema_alpha)*self._ema + self._ema_alpha*v
+        self._volts = self._ema
+        self._percent = self._estimate_soc_percent(self._volts / max(1, self._cells))
+        self.update()
+
+    def set_percent(self, percent: float, volts: float | None = None):
+        self._percent = max(0.0, min(100.0, float(percent)))
+        if volts is not None:
+            self._volts = float(volts)
+        self.update()
+
+    # --- LiPo OCV table (rough, per-cell, at rest) & interpolation ---
+    def _estimate_soc_percent(self, vpc: float) -> float:
+        table = [
+            (4.20, 100), (4.15, 95), (4.10, 90), (4.05, 85),
+            (4.00, 78), (3.95, 70), (3.90, 62), (3.85, 56),
+            (3.80, 45), (3.75, 35), (3.70, 25), (3.65, 18),
+            (3.60, 12), (3.55,  9), (3.50,  7), (3.45,  4),
+            (3.40,  2), (3.30,  0),
+        ]
+        if vpc >= table[0][0]: return 100.0
+        if vpc <= table[-1][0]: return 0.0
+        for i in range(len(table)-1):
+            v1, p1 = table[i]
+            v2, p2 = table[i+1]
+            if v2 <= vpc <= v1:
+                t = (vpc - v2) / (v1 - v2)
+                return p2 + t*(p1 - p2)
+        return 0.0
+
+    def _fill_color(self):
+        p = self._percent
+        if p >= 60: return QtGui.QColor("#2e8b57")  # green
+        if p >= 30: return QtGui.QColor("#f9a825")  # yellow
+        return QtGui.QColor("#d32f2f")              # red
+
+    # --- painting ---
+    def paintEvent(self, ev):
+        p = QtGui.QPainter(self); p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        rect = self.rect().adjusted(8, 8, -8, -8)
+
+        # battery body + cap geometry
+        body = QtCore.QRectF(rect.left(), rect.top(), rect.width()-18, rect.height())
+        cap_w = 10
+        cap_h = body.height() * 0.45
+        cap = QtCore.QRectF(body.right()+2, body.center().y()-cap_h/2, cap_w, cap_h)
+
+        # outline
+        p.setPen(QtGui.QPen(QtGui.QColor("#666"), 2))
+        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(body, 6, 6)
+        p.drawRoundedRect(cap, 3, 3)
+
+        # fill
+        inner = body.adjusted(4, 4, -4, -4)
+        pct = max(0.0, min(1.0, self._percent/100.0))
+        fill_w = inner.width() * pct
+        fill_rect = QtCore.QRectF(inner.left(), inner.top(), fill_w, inner.height())
+        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.setBrush(self._fill_color())
+        p.drawRoundedRect(fill_rect, 4, 4)
+
+        # text (volts + percent)
+        p.setPen(QtGui.QPen(QtGui.QColor("#333")))
+        txt = f"{self._volts:4.2f} V  ({self._percent:3.0f}%)"
+        p.drawText(self.rect().adjusted(0, 0, -6, -6),
+                   QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignBottom, txt)
+        p.end()
 
 class drone_UI(QtWidgets.QMainWindow):
     def __init__(self):
@@ -214,6 +303,9 @@ class drone_UI(QtWidgets.QMainWindow):
         leftLayout.addWidget(self.btnFlyPS4)
         leftLayout.addWidget(self.btnFlyKeyboard)
         leftLayout.addStretch(1)
+        self.battery = BatteryIndicator(cells=3)  # 3S LiPo
+        leftLayout.addWidget(self.battery, 0,
+        QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignBottom)
 
 
         #####
@@ -581,7 +673,14 @@ class drone_UI(QtWidgets.QMainWindow):
 
     def _handle_frame(self, frame: bytes):
         # 0..3: motor bytes, 4..17: IMU payload (14 bytes)
-        m0, m1, m2, m3 = frame[0], frame[1], frame[2], frame[3]
+        bat_adc = (frame[0] << 8) | frame[1]
+        batV = (bat_adc / 4095) * VBAT_RATIO
+        if hasattr(self, "battery"):
+            self.battery.set_voltage(batV, cells=3)
+
+        
+
+        m0, m1, m2, m3 = frame[2], frame[3], frame[4], frame[5]
         # Update RX numbers + bars
         try:
             order = self.order  # ('FrontLeft','FrontRight','BackLeft','BackRight')
@@ -591,7 +690,7 @@ class drone_UI(QtWidgets.QMainWindow):
             if hasattr(self, "rxLabels"):   self.rxLabels[name].setText(str(val))
             if hasattr(self, "barPairs"):   self.barPairs[name].setRX(val)
 
-        imu = frame[4:18]  # 14 bytes
+        imu = frame[6:20]  # 14 bytes
         # 7 big-endian int16: ax, ay, az, gx, gy, gz, temp(or spare)
         try:
             ax, ay, az, gx, gy, gz, _ = struct.unpack(">7h", imu)
