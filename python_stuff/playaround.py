@@ -87,5 +87,7 @@ def ball_on_plot():
         plt.show()
 
 
-ball_on_plot()
+for i in range(20):
+    set_motors()
+    send_powers()
 
