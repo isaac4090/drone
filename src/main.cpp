@@ -43,6 +43,12 @@ void setup_motors(){
   motorFL.setPeriodHertz(50);
   motorBL.setPeriodHertz(50);
   motorBR.setPeriodHertz(50);
+
+  // set motors to 0
+  motorFL.write(0);
+  motorFR.write(0);
+  motorBL.write(0);
+  motorBR.write(0);
 }
 
 ///////////////////////////
@@ -119,13 +125,16 @@ void setup() {
   //// Battery setup
   analogReadResolution(12);
   analogSetPinAttenuation(34, ADC_11db);
-  
-
 }
 
 void loop() {
   if (!client || !client.connected()) {
     client = server.available();
+    // set motors to 0
+    motorFL.write(0);
+    motorFR.write(0);
+    motorBL.write(0);
+    motorBR.write(0);
     return;
   }
 
