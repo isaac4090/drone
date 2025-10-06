@@ -19,3 +19,7 @@ PORT_DEFAULT = 2323
 MOTOR_ORDER = ("FrontLeft","FrontRight","BackLeft","BackRight")
 FULL_POWER  = 180
 STEP        = 1
+SLOW_POWER = 7
+ZERO = 0
+BEEPING_TIME_MS = 550  #will be times 10ish
+SWITCH_TIMEOUT = 30000

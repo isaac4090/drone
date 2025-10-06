@@ -213,7 +213,26 @@ class DroneWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"Switch is {'ON' if self.switch_is_on else 'OFF'} (V={vpack:.2f})")
 
     def _on_connected(self):
-        self.btnConnect.setText("Connected!")
+        # in debug mode turn connect into a switch flip
+        if self.debug:
+            self.btnConnect.setText("Connected! Press to flip switch")
+            self.btnConnect.setEnabled(True)
+            if self.switch_is_on is None:
+                self.switch_is_on = False
+                volts = 0
+            else:
+                self.switch_is_on = not self.switch_is_on
+                if self.switch_is_on:
+                    volts = 12
+                else:
+                    volts = 0
+
+            # set multiple to remove smoothing effect 
+            for _ in range(100):
+                self.battery.set_voltage(volts)
+            self._update_esc_button_gate(volts)
+        else:
+            self.btnConnect.setText("Connected!")
         self.btnConnect.setStyleSheet("QPushButton { background: green; color: white; }")
         self.btnStopMotors.setEnabled(True)
         self.btnDisconnect.setEnabled(True)
@@ -223,6 +242,9 @@ class DroneWindow(QtWidgets.QMainWindow):
         
         if not self.stopToggle:
             self._stop_toggle() # once connected motors will be in an off state
+
+
+
 
 
     def _on_failed_connect(self):
@@ -262,9 +284,132 @@ class DroneWindow(QtWidgets.QMainWindow):
             self.txLabels[name].setText(str(val))
             self.barPairs[name].setTX(val)
 
+    def _wait_ms(self, ms: int):
+        loop = QtCore.QEventLoop()
+        QtCore.QTimer.singleShot(ms, loop.quit)
+        loop.exec()
+
     # ---- Buttons / keys ----
     def _start_motors(self):
-        pass
+        for b in self._gate_buttons:
+            b.setEnabled(False)
+        
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Reset ESC's?",
+            "Are you sure you want to Reset the ESC's, Make sure the switch is off (O)",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        
+        # Progress bar
+        dlg = QtWidgets.QProgressDialog("Starting ESC reset…", "Cancel", 0, 100, self)
+        dlg.setWindowTitle("ESC Reset")
+        dlg.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+        dlg.setAutoClose(True)
+        dlg.setAutoReset(True)
+        dlg.setMinimumDuration(0)
+        dlg.setValue(0)
+
+        def set_status(text, pct):
+            dlg.setLabelText(text)
+            dlg.setValue(pct)
+            # ensure the dialog paints immediately
+            QtCore.QTimer.singleShot(0, lambda: None)
+            self._wait_ms(10)
+
+        def send(pwr):
+            for m in self.MotorPowers:
+                self.MotorPowers[m] = pwr
+            self._send_current_powers()
+
+        if hasattr(self, "is_switch_off") and callable(self.is_switch_off):
+            set_status("Checking switch is OFF…", 0)
+            if not self.is_switch_off():
+                dlg.cancel()
+                QtWidgets.QMessageBox.warning(
+                    self, "Switch must be OFF",
+                    "Safety check failed: the switch is not OFF.\nTurn it OFF and try again."
+                )
+                return
+            
+        set_status("Turn switch on now.", 5)
+        waited_ms = 0
+        while not self.switch_is_on:
+            if self.debug:
+                res = QtWidgets.QMessageBox.question(
+                    self,
+                    "Debug: Switch ON",
+                    "Debug mode: Pretend the switch was turned ON?\n\n"
+                    "Press OK to continue, or Cancel to abort.",
+                    QtWidgets.QMessageBox.StandardButton.Ok | QtWidgets.QMessageBox.StandardButton.Cancel,
+                    QtWidgets.QMessageBox.StandardButton.Ok,
+                )
+                if res == QtWidgets.QMessageBox.StandardButton.Ok:
+                    self._on_connected()
+                else:
+                    dlg.cancel()
+
+            # Normal route
+            if dlg.wasCanceled():
+                send(ZERO)
+                return
+            self._wait_ms(100)
+            waited_ms += 100
+            if waited_ms >= SWITCH_TIMEOUT:
+                send(ZERO,)
+                QtWidgets.QMessageBox.warning(self, "Timeout", "Timed out waiting for the switch to turn ON.")
+                return
+            
+
+            
+        send(FULL_POWER)
+        for pct in range(5, 50, 5):
+            if dlg.wasCanceled():
+                send(ZERO)
+                return
+            set_status("Holding FULL power. Beep, Beep ...", pct)
+            self._wait_ms(BEEPING_TIME_MS)  
+
+        send(ZERO)
+        for pct in range(50,95,5):
+            if dlg.wasCanceled():
+                send(ZERO)
+                return
+            set_status("Cutting power to 0. Beep,Beep...", pct)
+            self._wait_ms(BEEPING_TIME_MS)  
+        if dlg.wasCanceled():
+            return
+        send(SLOW_POWER)
+        set_status("Waiting for user response", 99)
+        res = QtWidgets.QMessageBox.question(
+            self,
+            "Check motors",
+            "Are ALL motors spinning smoothly at low power?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.Yes,
+        )
+        if res == QtWidgets.QMessageBox.StandardButton.Yes:
+            QtWidgets.QMessageBox.information(self, "ESC Reset", "ESC reset/test complete ✅")
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "ESC Reset",
+                "Some motors did not spin.\n\n"
+                "• Check wiring and ESC signal/ground\n"
+                "• Re-run calibration per ESC vendor procedure\n"
+                "• Inspect for mechanical obstruction"
+            )
+        send(ZERO)
+        dlg.close()
+
+        self.btnDisconnect.setEnabled(True)
+        self.btnStopMotors.setEnabled(True)
+        if self.debug:
+            self._update_esc_button_gate(11) 
+
+        
 
 
 
