@@ -12,3 +12,5 @@ Thumbs.db
 
 # Python venv (if you play with scripts)
 env
+
+python_stuff/__pycache__
