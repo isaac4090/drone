@@ -325,15 +325,17 @@ class DroneWindow(QtWidgets.QMainWindow):
                 self.MotorPowers[m] = pwr
             self._send_current_powers()
 
-        if hasattr(self, "is_switch_off") and callable(self.is_switch_off):
-            set_status("Checking switch is OFF…", 0)
-            if not self.is_switch_off():
-                dlg.cancel()
-                QtWidgets.QMessageBox.warning(
-                    self, "Switch must be OFF",
-                    "Safety check failed: the switch is not OFF.\nTurn it OFF and try again."
-                )
-                return
+        self.switch_is_on
+
+        
+        if self.switch_is_on:
+            dlg.cancel()
+            send(ZERO)
+            QtWidgets.QMessageBox.warning(
+                self, "Switch must be OFF",
+                "Safety check failed: the switch is not OFF.\nTurn it OFF and try again."
+            )
+            return
             
         set_status("Turn switch on now.", 5)
         waited_ms = 0
@@ -366,7 +368,7 @@ class DroneWindow(QtWidgets.QMainWindow):
 
             
         send(FULL_POWER)
-        for pct in range(5, 50, 5):
+        for pct in range(5, 40, 5):
             if dlg.wasCanceled():
                 send(ZERO)
                 return
@@ -374,7 +376,7 @@ class DroneWindow(QtWidgets.QMainWindow):
             self._wait_ms(BEEPING_TIME_MS)  
 
         send(ZERO)
-        for pct in range(50,95,5):
+        for pct in range(40,95,5):
             if dlg.wasCanceled():
                 send(ZERO)
                 return
