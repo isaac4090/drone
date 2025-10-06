@@ -10,7 +10,6 @@ class DroneWindow(QtWidgets.QMainWindow):
     def __init__(self, debug:bool = False):
         super().__init__()
         self.debug = debug
-        print(self.debug)
         self.setWindowTitle("Drone")
         self.MotorPowers = {n:0 for n in MOTOR_ORDER}
         self.step = STEP
@@ -20,11 +19,14 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.pressed = set()
         self._latest = None
 
+        self.switch_is_on = None 
+         
+
         # ---- Net
         self.net = NetClient(self)
         self.net.connected.connect(self._on_connected)
         self.net.disconnected.connect(self._on_disconnected)
-        self.net.errorText.connect(lambda t: self.statusBar().showMessage(t))
+        self.net.errorText.connect(self._on_failed_connect)
         self.net.frameReady.connect(self._on_frame)
 
         # ---- UI layout
@@ -42,10 +44,12 @@ class DroneWindow(QtWidgets.QMainWindow):
 
         self.btnConnect     = big_button("Connect")
         self.btnDisconnect  = big_button("Disconnect")
-        self.btnStartMotors = big_button("Start Motors")
-        self.btnStopMotors  = big_button("Stop Motors")
+        self.btnStartMotors = big_button("Reset ESC's")
+        self.btnStopMotors  = big_button("Motors disenabled — press to enable")
         self.btnFlyPS4      = big_button("Fly PS4")
         self.btnFlyKeyboard = big_button("Fly Keyboard")
+
+        self._base_btn_style = self.btnStopMotors.styleSheet() 
 
         for b in (self.btnConnect, self.btnDisconnect, self.btnStartMotors,
                   self.btnStopMotors, self.btnFlyPS4, self.btnFlyKeyboard):
@@ -110,6 +114,19 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.btnStopMotors.clicked.connect(self._stop_toggle)
         self.btnFlyKeyboard.clicked.connect(self._fly_keyboard_toggle)
 
+        # initally only have connect button available
+        self._gate_buttons = [
+            self.btnDisconnect,
+            self.btnStartMotors,
+            self.btnStopMotors,
+            self.btnFlyPS4,
+            self.btnFlyKeyboard,
+        ]
+
+        for b in self._gate_buttons:
+            b.setEnabled(False)
+        self.btnConnect.setEnabled(True)
+
         # key capture + hold
         QtWidgets.QApplication.instance().installEventFilter(self)
         self.key_to_pill = {
@@ -132,24 +149,86 @@ class DroneWindow(QtWidgets.QMainWindow):
     # ---- Net handlers ----
     def _connect(self, host, port):
         self.btnConnect.setEnabled(False)
+        if(self.debug):
+            self._on_connected()
+            return
         self.btnConnect.setText("Connecting...")
         self.btnConnect.setStyleSheet("QPushButton { background: orange; color: white; }")
         self.net.connectTo(host, port)
 
     def _disconnect(self):
-        self.net.disconnect()
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Disconnect?",
+            "Are you sure you want to disconnect from the drone?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        
+        if not self.stopToggle:
+            self._stop_toggle()
+
+        if not self.debug:
+            self.disconnect()
+        else:
+            self._on_disconnected()
+
+
+    def _is_connected(self) -> bool:
+        return self.debug or (
+            hasattr(self.net, "s") and
+            self.net.s.state() == QAbstractSocket.SocketState.ConnectedState
+        )
+    
+    def _update_esc_button_gate(self, vpack: float):
+        prev = self.switch_is_on
+        if self.switch_is_on is None:
+            # First reading -> classify
+            self.switch_is_on = (vpack >= SWITCH_ON_TH)
+        else:
+            if self.switch_is_on:
+                # currently ON -> only flip OFF when well below OFF threshold
+                if vpack <= SWITCH_OFF_TH:
+                    self.switch_is_on = False
+                    self._stop_toggle()
+
+            else:
+                # currently OFF -> only flip ON when clearly above ON threshold
+                if vpack >= SWITCH_ON_TH:
+                    self.switch_is_on = True
+                    self.btnStopMotors.setText("Motors disenabled — press to enable")
+
+        # Gate the button: enabled only if connected and switch OFF
+        allow = self._is_connected() and (self.switch_is_on is False)
+        self.btnStartMotors.setEnabled(allow)
+        self.btnStartMotors.setToolTip(
+            "Switch is OFF — safe to reset ESCs" if allow
+            else "Turn the switch OFF to reset ESCs"
+        )
+        
+
+        if prev != self.switch_is_on and self.switch_is_on is not None:
+            self.statusBar().showMessage(f"Switch is {'ON' if self.switch_is_on else 'OFF'} (V={vpack:.2f})")
 
     def _on_connected(self):
         self.btnConnect.setText("Connected!")
         self.btnConnect.setStyleSheet("QPushButton { background: green; color: white; }")
-        self.btnDisconnect.setEnabled(True)
-        self.btnStartMotors.setEnabled(True)
         self.btnStopMotors.setEnabled(True)
-        self.btnFlyPS4.setEnabled(True)
-        self.btnFlyKeyboard.setEnabled(True)
+        self.btnDisconnect.setEnabled(True)
         # start motor send timer
         self._sendTimer = QtCore.QTimer(self); self._sendTimer.setInterval(int(1000/SEND_HZ))
         self._sendTimer.timeout.connect(self._send_current_powers); self._sendTimer.start()
+        
+        if not self.stopToggle:
+            self._stop_toggle() # once connected motors will be in an off state
+
+
+    def _on_failed_connect(self):
+        self.btnConnect.setText("Connection failed, try again?")
+        self.btnConnect.setStyleSheet("QPushButton { background: red; color: white; }")
+        self.btnConnect.setEnabled(True)
 
     def _on_disconnected(self):
         self.statusBar().showMessage("Disconnected")
@@ -157,6 +236,9 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.btnConnect.setText("Connect")
         self.btnConnect.setStyleSheet("")
         if hasattr(self, "_sendTimer") and self._sendTimer.isActive(): self._sendTimer.stop()
+        for b in self._gate_buttons:
+            b.setEnabled(False)
+        self.btnConnect.setEnabled(True)
 
     def _on_frame(self, frame: bytes):
         self._latest = parse_frame(frame)
@@ -170,6 +252,7 @@ class DroneWindow(QtWidgets.QMainWindow):
             self.rxLabels[name].setText(str(val))
             self.barPairs[name].setRX(val)
         self.tiltBall.set_xy(d["x"], d["y"])
+        self._update_esc_button_gate(d["batV"])
 
     # ---- Motor send ----
     def _send_current_powers(self):
@@ -181,73 +264,24 @@ class DroneWindow(QtWidgets.QMainWindow):
 
     # ---- Buttons / keys ----
     def _start_motors(self):
-        self.btnStartMotors.setText("Starting Motors...")
-        self.btnStartMotors.setStyleSheet("QPushButton { background: orange; color: white; }")
-        self.btnStartMotors.setEnabled(False)
-        switch = QtWidgets.QMessageBox.information(
-            self,
-            "ESC Startup",
-            "Make sure the swtich is off (O). \nThen press OK.",
-            QtWidgets.QMessageBox.StandardButton.Ok,
-        )
-        if switch == QtWidgets.QMessageBox.StandardButton.Ok:
-            for m in self.MotorPowers:
-                self.MotorPowers[m] = self.fullPower
-            self._send_current_powers()
-            ret = QtWidgets.QMessageBox.information(
-                self,
-                "ESC Startup",
-                "Turn on the switch, wait for beeping to stop.\nThen press OK.",
-                QtWidgets.QMessageBox.StandardButton.Ok,
-            )
-            if ret == QtWidgets.QMessageBox.StandardButton.Ok:
-                for m in self.MotorPowers:
-                    self.MotorPowers[m] = 0
-                self._send_current_powers()
-                ret2 = QtWidgets.QMessageBox.information(
-                    self,
-                    "ESC Startup",
-                    "Press OK once beeping has stoped",
-                    QtWidgets.QMessageBox.StandardButton.Ok,
-                )
-                if ret2 == QtWidgets.QMessageBox.StandardButton.Ok:
-                    # now send low power to check if motors are working
-                    for m in self.MotorPowers:
-                        self.MotorPowers[m] = 7
-                    self._send_current_powers()
-                    ret3 = QtWidgets.QMessageBox.question(
-                        self,
-                        "Motor Check",
-                        "Are all motors spinning?",
-                        QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
-                        QtWidgets.QMessageBox.StandardButton.Yes,
-                    )
-                    if ret3 == QtWidgets.QMessageBox.StandardButton.Yes:
-                        # Success state
-                        for m in self.MotorPowers:
-                            self.MotorPowers[m] = 0
-                        self._send_current_powers()
-                        self.statusBar().showMessage("Spin check OK")
-                        self.btnStartMotors.setText("Motors Ready")
-                        self.btnStartMotors.setStyleSheet("QPushButton { background: green; color: white; }")
-                        self.btnStartMotors.setEnabled(False)
-                    else:
-                        # Not spinning — show a warning and reset UI
-                        QtWidgets.QMessageBox.warning(
-                            self, "Motor Check Failed",
-                            "Turn off the switch!!!!"
-                        )
-                        self.btnStartMotors.setText("Motors failed, restart UI")
-                        self.btnStartMotors.setEnabled(False)
-                        self.btnStartMotors.setStyleSheet("QPushButton { background: red; color: white; }")
+        pass
+
+
 
     def _stop_toggle(self):
         self.stopToggle = not self.stopToggle
-        if self.stopToggle:
-            for m in self.MotorPowers: self.MotorPowers[m] = 0
+        if self.stopToggle or not self.switch_is_on:
+            for m in self.MotorPowers: 
+                self.MotorPowers[m] = 0
             self._send_current_powers()
-            self.btnStopMotors.setText("Motors stopped — press to enable")
-            self.btnStopMotors.setStyleSheet("QPushButton { background: red; color: white; }")
+            if not self.switch_is_on:
+                self.btnStopMotors.setText("Motors disenabled — Switch is off")
+                self.stopToggle = True
+            else:
+                self.btnStopMotors.setText("Motors disenabled — press to enable")
+            self.btnStopMotors.setStyleSheet(self._base_btn_style)
+            if self.flyKeyboardToggle:
+                self._fly_keyboard_toggle()
             self.btnFlyKeyboard.setEnabled(False); self.btnFlyPS4.setEnabled(False)
         else:
             self.btnStopMotors.setText("Motors enabled — press to stop")
