@@ -1,6 +1,8 @@
 #pragma once
 #include <Arduino.h>
 
+#define SERIAL_DEBUG // allow serial debugs
+
 namespace cfg {
     // Wi-Fi
     constexpr char SSID[] = "Drone";

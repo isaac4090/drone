@@ -28,6 +28,7 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.net.disconnected.connect(self._on_disconnected)
         self.net.errorText.connect(self._on_failed_connect)
         self.net.frameReady.connect(self._on_frame)
+        self.net.bannerReceived.connect(self._show_reset_banner)
 
         # ---- UI layout
         central = QtWidgets.QWidget(); self.setCentralWidget(central)
@@ -233,6 +234,7 @@ class DroneWindow(QtWidgets.QMainWindow):
             self._update_esc_button_gate(volts)
         else:
             self.btnConnect.setText("Connected!")
+            self.net.start_banner_detection(10000) # look for reset banner
         self.btnConnect.setStyleSheet("QPushButton { background: green; color: white; }")
         self.btnStopMotors.setEnabled(True)
         self.btnDisconnect.setEnabled(True)
@@ -245,7 +247,8 @@ class DroneWindow(QtWidgets.QMainWindow):
 
 
 
-
+    def _show_reset_banner(self, line: str):
+        QtWidgets.QMessageBox.information(self, "ESP Reset Info", line)
 
     def _on_failed_connect(self):
         self.btnConnect.setText("Connection failed, try again?")
