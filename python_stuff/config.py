@@ -23,3 +23,17 @@ SLOW_POWER = 7
 ZERO = 0
 BEEPING_TIME_MS = 700  
 SWITCH_TIMEOUT = 30000
+
+RESET_EXPLAIN = {
+    "POWERON":   "Power cycled. Likely switch toggled or intermittent power/regulator/connector.",
+    "BROWNOUT":  "3.3V rail dipped below brown-out threshold (~2.9–3.0 V). Check power/loads/wiring.",
+    "SW_RESET":  "Software restart (esp_restart was called).",
+    "WDT":       "Watchdog timeout. A task or loop blocked too long.",
+    "TASK_WDT":  "Task watchdog timeout. A specific task stalled.",
+    "INT_WDT":   "Interrupt watchdog timeout.",
+    "PANIC":     "Crash/exception (Guru Meditation). Check serial logs/backtrace.",
+    "EXT_PIN":   "External reset pin toggled (EN/RST).",
+    "DEEPSLEEP": "Woke up from deep sleep.",
+    "SDIO":      "Reset via SDIO (rare).",
+    "OK":        "Normal reconnect (no new reset).",
+}

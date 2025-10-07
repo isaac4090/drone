@@ -3,7 +3,7 @@ from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtNetwork import QAbstractSocket
 from .config import *
 from .net import NetClient
-from .telemetry import parse_frame
+from .telemetry import parse_frame,reset_banner_str
 from .widgets import TiltBall, BatteryIndicator, BarPair, KeyPill, triangle_widget
 
 class DroneWindow(QtWidgets.QMainWindow):
@@ -248,7 +248,8 @@ class DroneWindow(QtWidgets.QMainWindow):
 
 
     def _show_reset_banner(self, line: str):
-        QtWidgets.QMessageBox.information(self, "ESP Reset Info", line)
+        reset_info = reset_banner_str(line)
+        QtWidgets.QMessageBox.information(self, "ESP Reset Info",reset_info )
 
     def _on_failed_connect(self):
         self.btnConnect.setText("Connection failed, try again?")
