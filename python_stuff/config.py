@@ -9,7 +9,9 @@ A_SENS = 16384.0  # MPU9250/MPU6050 accel LSB/g
 # battery scaling
 VBAT_RATIO = 13.21 # voltage max for battery should be 12.6V dont go below 10.5V absolute minimum 9V will fuck it 
 SWITCH_ON_TH  = 8  
-SWITCH_OFF_TH = 3
+SWITCH_OFF_TH = 5
+DEBUG_ADC_HIGH = 3600
+DEBUG_ADC_LOW = -0
 
 # Wifi defualts
 HOST_DEFAULT = "192.168.4.1"
@@ -19,7 +21,7 @@ PORT_DEFAULT = 2323
 MOTOR_ORDER = ("FrontLeft","FrontRight","BackLeft","BackRight")
 FULL_POWER  = 180
 STEP        = 1
-SLOW_POWER = 7
+SLOW_POWER = 5
 ZERO = 0
 BEEPING_TIME_MS = 700  
 SWITCH_TIMEOUT = 30000

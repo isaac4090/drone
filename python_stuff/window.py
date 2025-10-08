@@ -7,9 +7,12 @@ from .telemetry import parse_frame,reset_banner_str
 from .widgets import TiltBall, BatteryIndicator, BarPair, KeyPill, triangle_widget
 
 class DroneWindow(QtWidgets.QMainWindow):
-    def __init__(self, debug:bool = False):
+    def __init__(self, debug:bool = False, no_drone:bool = False):
         super().__init__()
-        self.debug = debug
+        self.debug = debug or no_drone 
+        self.noDrone = no_drone
+        self.debugADCValues = DEBUG_ADC_LOW if (debug and not no_drone) else None
+        self.debugFirstConnectPush = True
         self.setWindowTitle("Drone")
         self.MotorPowers = {n:0 for n in MOTOR_ORDER}
         self.step = STEP
@@ -150,7 +153,10 @@ class DroneWindow(QtWidgets.QMainWindow):
     # ---- Net handlers ----
     def _connect(self, host, port):
         self.btnConnect.setEnabled(False)
-        if(self.debug):
+        if(self.noDrone):
+            self._on_connected()
+            return
+        if(self.debug and self._is_connected()):
             self._on_connected()
             return
         self.btnConnect.setText("Connecting...")
@@ -171,14 +177,14 @@ class DroneWindow(QtWidgets.QMainWindow):
         if not self.stopToggle:
             self._stop_toggle()
 
-        if not self.debug:
+        if not self.noDrone:
             self.disconnect()
         else:
             self._on_disconnected()
 
 
     def _is_connected(self) -> bool:
-        return self.debug or (
+        return self.noDrone or (
             hasattr(self.net, "s") and
             self.net.s.state() == QAbstractSocket.SocketState.ConnectedState
         )
@@ -218,20 +224,26 @@ class DroneWindow(QtWidgets.QMainWindow):
         if self.debug:
             self.btnConnect.setText("Connected! Press to flip switch")
             self.btnConnect.setEnabled(True)
-            if self.switch_is_on is None:
-                self.switch_is_on = False
-                volts = 0
-            else:
-                self.switch_is_on = not self.switch_is_on
-                if self.switch_is_on:
-                    volts = 12
-                else:
+            if self.noDrone:
+                if self.switch_is_on is None:
+                    self.switch_is_on = False
                     volts = 0
+                else:
+                    self.switch_is_on = not self.switch_is_on
+                    if self.switch_is_on:
+                        volts = 12
+                    else:
+                        volts = 0
 
-            # set multiple to remove smoothing effect 
-            for _ in range(100):
-                self.battery.set_voltage(volts)
-            self._update_esc_button_gate(volts)
+                # set multiple to remove smoothing effect 
+                for _ in range(100):
+                    self.battery.set_voltage(volts)
+                self._update_esc_button_gate(volts)
+            else:
+                self.debugADCValues = DEBUG_ADC_HIGH - self.debugADCValues
+                if self.debugFirstConnectPush:
+                    self.net.start_banner_detection(10000) # look for reset banner
+                    self.debugFirstConnectPush = False
         else:
             self.btnConnect.setText("Connected!")
             self.net.start_banner_detection(10000) # look for reset banner
@@ -267,7 +279,7 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.btnConnect.setEnabled(True)
 
     def _on_frame(self, frame: bytes):
-        self._latest = parse_frame(frame)
+        self._latest = parse_frame(frame,self.debug and not self.noDrone, self.debugADCValues)
 
     # ---- UI periodic refresh ----
     def _pump_ui(self):
@@ -412,7 +424,7 @@ class DroneWindow(QtWidgets.QMainWindow):
 
         self.btnDisconnect.setEnabled(True)
         self.btnStopMotors.setEnabled(True)
-        if self.debug:
+        if self.noDrone:
             self._update_esc_button_gate(11) 
 
         

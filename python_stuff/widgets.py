@@ -133,7 +133,7 @@ def triangle_widget(apex: QtWidgets.QWidget, base_left: QtWidgets.QWidget,
     g.setContentsMargins(0, 0, 0, 0)
     g.setHorizontalSpacing(8)
     g.setVerticalSpacing(8)
-    # 2 rows x 3 cols
+    # 2 rows x 3 colsI
     g.addWidget(apex,        0, 1)      # top center
     g.addWidget(base_left,   1, 0)
     g.addWidget(base_center, 1, 1)
@@ -153,7 +153,7 @@ class BatteryIndicator(QtWidgets.QWidget):
         self._volts = 0.0
         self._percent = 0.0
         self._ema = None   # simple smoothing
-        self._ema_alpha = 0.15
+        self._ema_alpha = 0.5
         self.setFixedSize(500, 120)
         self.setToolTip("Battery")
 

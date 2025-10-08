@@ -1,9 +1,14 @@
 import math, struct
 from .config import A_SENS, VBAT_RATIO, RESET_EXPLAIN
 
-def parse_frame(frame: bytes):
+def parse_frame(frame: bytes, debug:bool = False, ADCValue:int = None):
     """Return dict: batV, bat_adc, motors(tuple), x, y, imu14."""
-    bat_adc = (frame[0] << 8) | frame[1]
+
+    # if run in debug mode. esp32 powered via usb or sperate supply, allow user set ADCVlaue
+    if debug:
+        bat_adc = ADCValue
+    else:
+        bat_adc = (frame[0] << 8) | frame[1]
     m0, m1, m2, m3 = frame[2], frame[3], frame[4], frame[5]
     imu14 = frame[6:20]
 
