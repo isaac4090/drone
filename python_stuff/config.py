@@ -10,7 +10,7 @@ A_SENS = 16384.0  # MPU9250/MPU6050 accel LSB/g
 VBAT_RATIO = 13.21 # voltage max for battery should be 12.6V dont go below 10.5V absolute minimum 9V will fuck it 
 SWITCH_ON_TH  = 8  
 SWITCH_OFF_TH = 5
-DEBUG_ADC_HIGH = 3600
+DEBUG_ADC_HIGH = 12
 DEBUG_ADC_LOW = -0
 
 # Wifi defualts

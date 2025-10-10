@@ -1,4 +1,5 @@
 #include "IMU.h"
+#include "config.h"
 
 void IMU::begin(uint8_t pinCS, uint8_t sck, uint8_t miso, uint8_t mosi) {
   cs = pinCS;
@@ -41,4 +42,27 @@ uint8_t IMU::read8(uint8_t reg) {
   uint8_t v = SPI.transfer(0x00);
   digitalWrite(cs, HIGH);
   return v;
+}
+
+void IMU::readSI(SI &o){
+  uint8_t r[14];
+  readRaw14(r);
+
+  const int16_t ax = s16(r[0],  r[1]);
+  const int16_t ay = s16(r[2],  r[3]);
+  const int16_t az = s16(r[4],  r[5]);
+
+  const int16_t gx = s16(r[8],  r[9]);
+  const int16_t gy = s16(r[10], r[11]);
+  const int16_t gz = s16(r[12], r[13]);
+
+  o.ax_g   = ax * cfg::ACC_G_PER_LSB;
+  o.ay_g   = ay * cfg::ACC_G_PER_LSB;
+  o.az_g   = az * cfg::ACC_G_PER_LSB;
+
+  o.gx_dps = gx * cfg::GYRO_DPS_PER_LSB;
+  o.gy_dps = gy * cfg::GYRO_DPS_PER_LSB;
+  o.gz_dps = gz * cfg::GYRO_DPS_PER_LSB;
+
+
 }

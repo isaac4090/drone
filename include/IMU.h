@@ -13,10 +13,18 @@ constexpr uint8_t REG_ACCEL_CONFIG   = 0x1C;
 constexpr uint8_t REG_ACCEL_CONFIG2  = 0x1D;
 constexpr uint8_t REG_ACCEL_XOUT_H   = 0x3B;
 
+struct SI {
+  float ax_g, ay_g, az_g;   // accel in g
+  float gx_dps, gy_dps, gz_dps; // gyro in dps
+};
+
+inline int16_t s16(uint8_t hi, uint8_t lo) { return (int16_t)((hi << 8) | lo); }
+
 class IMU {
 public:
   void begin(uint8_t pinCS, uint8_t sck, uint8_t miso, uint8_t mosi);
   void readRaw14(uint8_t *buf14);
+  void readSI(SI &o);
   uint8_t whoAmI() const { return who; }
 private:
   uint8_t cs = 255;
@@ -24,3 +32,4 @@ private:
   void write8(uint8_t reg, uint8_t val);
   uint8_t read8(uint8_t reg);
 };
+

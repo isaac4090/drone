@@ -73,3 +73,5 @@ class NetClient(QtCore.QObject):
         while len(self._rx) >= PACKET_LEN:
             frame = bytes(self._rx[:PACKET_LEN]); del self._rx[:PACKET_LEN]
             self.frameReady.emit(frame)
+
+    

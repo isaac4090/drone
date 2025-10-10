@@ -127,3 +127,35 @@ void WifiLink::closeClient() {
   _state = WAIT_CLIENT;
   _bannerSentThisConn = false;
 }
+
+
+size_t WifiLink::sendFastTelemetry(uint16_t loop_us,
+                                     uint16_t bat_adc,
+                                     const uint8_t mot[4],
+                                     float roll_deg, float pitch_deg,
+                                     float gx_dps,  float gy_dps)
+{
+  if (_state != STREAMING || !_client.connected()) return 0;
+
+  auto q = [](float v, float s)->int16_t {
+    float f = v * s;
+    if (f >  32767.f) f =  32767.f;
+    if (f < -32768.f) f = -32768.f;
+    return (int16_t)f;
+  };
+
+  AnglesPkt p{};
+  p.type        = PKT_ANGLES;
+  p.seq_be      = htobe16_u16(_txSeq++);
+  p.loop_us_be  = htobe16_u16(loop_us);
+  p.bat_adc_be  = htobe16_u16(bat_adc);
+  p.mot[0]=mot[0]; p.mot[1]=mot[1]; p.mot[2]=mot[2]; p.mot[3]=mot[3];
+
+  p.roll_c_be  = (int16_t)htobe16_u16((uint16_t)q(roll_deg,  100.f));
+  p.pitch_c_be = (int16_t)htobe16_u16((uint16_t)q(pitch_deg, 100.f));
+  p.gx_c_be    = (int16_t)htobe16_u16((uint16_t)q(gx_dps,    100.f));
+  p.gy_c_be    = (int16_t)htobe16_u16((uint16_t)q(gy_dps,    100.f));
+
+  p.csum = xor8_sum(reinterpret_cast<const uint8_t*>(&p), sizeof(p) - 1);
+  return writeTelemetry(reinterpret_cast<const uint8_t*>(&p), sizeof(p));
+}

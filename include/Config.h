@@ -1,7 +1,18 @@
 #pragma once
-#include <Arduino.h>
 
-#define SERIAL_DEBUG // allow serial debugs
+#define SERIAL_DEBUG 0
+
+#if SERIAL_DEBUG
+  #define DBG_BEGIN(baud)   do { Serial.begin(baud); } while(0)
+  #define DBGF(...)         Serial.printf(__VA_ARGS__)
+  #define DBGLN(...)        Serial.println(__VA_ARGS__)
+  #define DBG(...)          Serial.print(__VA_ARGS__)
+#else
+  #define DBG_BEGIN(baud)   do {} while(0)
+  #define DBGF(...)         do {} while(0)
+  #define DBGLN(...)        do {} while(0)
+  #define DBG(...)          do {} while(0)
+#endif
 
 namespace cfg {
     // Wi-Fi
@@ -24,12 +35,20 @@ namespace cfg {
     constexpr int motorBRpin = 14;  
 
     // Battery ADC
-    constexpr uint8_t  VBAT_PIN = 34;      // ADC1, OK with Wi-Fi
-    constexpr auto     VBAT_ATT = ADC_11db; // or ADC_0db if your pin ~0.3–0.4 V
+    constexpr uint8_t  VBAT_PIN = 34;      // ADC1
+    constexpr auto     VBAT_ATT = ADC_11db;
 
     // Gyro SPI pins
     static const int PIN_MOSI = 23;
     static const int PIN_MISO = 19;
     static const int PIN_SCK  = 18;
     static const int PIN_CS   = 5;
+    constexpr float ACC_G_PER_LSB    = 1.0f / 16384.0f;
+    constexpr float GYRO_DPS_PER_LSB = 1.0f / 16.4f;
+
+    // Tilt hold rate 
+    constexpr uint16_t TILT_CONTR_HZ = 500;
+
+
+
 }
