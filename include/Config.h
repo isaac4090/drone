@@ -26,7 +26,8 @@ namespace cfg {
     constexpr uint8_t  PWM_HZ  = 50;
 
     // Telemetry rate
-    constexpr uint16_t TELEMETRY_HZ = 50; // 100 Hz => period 10 ms
+    constexpr uint16_t TELEMETRY_HZ = 50; 
+    constexpr uint16_t SLOWTELMETRY_HZ = 10;
 
     // Define pins for a motor controller
     constexpr int motorFLpin = 33; 

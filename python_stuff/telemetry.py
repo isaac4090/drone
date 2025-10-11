@@ -1,9 +1,9 @@
 import math, struct
-from .config import A_SENS, VBAT_RATIO, RESET_EXPLAIN
+from .config import A_SENS, VBAT_RATIO, RESET_EXPLAIN, PKT_ANGLES, PKT_DEBUG
 
 
-PKT_ANGLES = 0xA2
-PKT_SIZES = {PKT_ANGLES: 22}
+
+
 
 def xor8(b: bytes) -> int:
     x = 0
@@ -22,48 +22,46 @@ def parse_frame(frame: bytes, debug:bool = False, ADCValue:int = None):
     if fType == PKT_ANGLES:
         out = parse_fast_frame(frame)
 
+    elif fType == PKT_DEBUG:
+        out = parse_slow_frame(frame)
+    else:
+        out = {}
+
+
     if debug:
-        out['batV'] = ADCValue
+        if 'batV' in out:
+            out['batV'] = ADCValue
 
     return out
 
+def parse_slow_frame(pkt:bytes):
+    (ptype, seq, loop_us,
+     e_roll_c, e_pitch_c,
+     I_roll_c, I_pitch_c,
+     u_r_c, u_p_c, csum) = struct.unpack(">B H H h h h h h h B", pkt)
 
-    # if debug:
-    #     bat_adc = ADCValue
-    # else:
-    #     bat_adc = (frame[0] << 8) | frame[1]
-    # m0, m1, m2, m3 = frame[2], frame[3], frame[4], frame[5]
-    # imu14 = frame[6:20]
+    recivedCsum = xor8(pkt[:-1])
+    if recivedCsum != csum:
+        print(f"checksum mismatch slow frame, from drone: {csum} from new calc: {recivedCsum}")
+        print(ptype, seq, loop_us,e_roll_c, e_pitch_c,I_roll_c, I_pitch_c,u_r_c, u_p_c, csum)
+        return {}
+    
+    return {}
+    
 
-    # # accel/gyro as big-endian int16
-    # ax, ay, az, gx, gy, gz, _ = struct.unpack(">7h", imu14)
-    # ax_g, ay_g, az_g = ax / A_SENS, ay / A_SENS, az / A_SENS
-    # g = math.sqrt(ax_g*ax_g + ay_g*ay_g + az_g*az_g) or 1.0
-    # x = ax_g / g
-    # y = ay_g / g
-
-    # # battery from ADC -> voltage
-    # batV = (bat_adc / 4095.0) * VBAT_RATIO
-
-    # return {
-    #     "bat_adc": bat_adc,
-    #     "batV": batV,
-    #     "motors": (m0, m1, m2, m3),
-    #     "x": x, "y": y,
-    #     "imu14": imu14,
-    # }
 
 def parse_fast_frame(pkt:bytes):
     (ptype, seq, loop_us, bat_adc,
      m0, m1, m2, m3,
      roll_c, pitch_c, gx_c, gy_c, csum) = struct.unpack(">B H H H 4B h h h h B", pkt)
     
-    if xor8(pkt[:-1]) != csum:
+    recivedCsum = xor8(pkt[:-1])
+    if recivedCsum != csum:
+        print(f"checksum mismatch fast frame, from drone: {csum} from new calc: {recivedCsum}")
         print(ptype, seq, loop_us, bat_adc,
      m0, m1, m2, m3,
      roll_c, pitch_c, gx_c, gy_c, csum)
-        print(f"checksum mismatch, {csum}")
-        # return None
+        return {}
     
     roll_deg  = roll_c  / 100.0
     pitch_deg = pitch_c / 100.0

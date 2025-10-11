@@ -1,6 +1,6 @@
 from PyQt6 import QtCore
 from PyQt6.QtNetwork import QTcpSocket, QAbstractSocket
-from .config import PACKET_LEN
+from .config import MAX_BUF,PKT_SIZES
 
 class NetClient(QtCore.QObject):
     connected    = QtCore.pyqtSignal()
@@ -66,12 +66,31 @@ class NetClient(QtCore.QObject):
 
         self._rx.extend(self.s.readAll().data())
 
-        # If backlog builds, drop oldest complete frames, keep most recent
-        while len(self._rx) >= PACKET_LEN * 2:
-            del self._rx[:PACKET_LEN]
+        if len(self._rx) > MAX_BUF:
+            # drop oldest, keep tail (recent)
+            del self._rx[:len(self._rx) - MAX_BUF]
 
-        while len(self._rx) >= PACKET_LEN:
-            frame = bytes(self._rx[:PACKET_LEN]); del self._rx[:PACKET_LEN]
+        while True:
+            if len(self._rx) < 1:
+                # needs at least a byte to deturmian packet type
+                break
+
+            ptype = self._rx[0]
+            pLen = PKT_SIZES.get(ptype)
+
+            if pLen is None:
+                # drop byte look at next
+                del self._rx[0:1]
+
+            if len(self._rx) < pLen:
+                break
+
+            frame = bytes(self._rx[:pLen])
+            del self._rx[:pLen]
             self.frameReady.emit(frame)
+
+
+            
+
 
     

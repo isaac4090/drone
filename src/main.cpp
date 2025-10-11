@@ -10,36 +10,20 @@
 #include "AttitudeEstimator.h"
 #include "TiltController.h"
 
-// --- Tilt-hold state & tuning ---
-static float g_roll_deg = 0.0f, g_pitch_deg = 0.0f;   // complementary-filter angles
-static float gi_roll = 0.0f, gi_pitch = 0.0f;         // integrators
-
-
-
-// Motor limits for your writeRaw() (uint8_t -> 0..255)
-static constexpr float M_MIN = 0.0f;
-static constexpr float M_MAX = 255.0f;
-
-
-/////////////////
-
-// Loop timers helpers
-static uint32_t lastCtrlUs = 0;
-static uint32_t nextCtrlDueUs = 0;
-
-static uint32_t lastTxUs = 0;
-static uint32_t nextTxDueUs = 0;
-
 uint8_t mFL = 0, mFR = 0, mBL = 0, mBR = 0;
 uint8_t oFL = 0, oFR = 0, oBL = 0, oBR = 0;
-uint32_t lastTxMs = 0;
 
 
 struct Periodic {
-  uint32_t next_us=0, period_us=0;
-  void start(uint32_t now, uint32_t period){ next_us=now+period; period_us=period; }
+  uint32_t next_us=0, period_us=0,last_fire_us = 0;
+  void start(uint32_t now, uint32_t period){ next_us=now+period; period_us=period; last_fire_us = now; }
   bool due(uint32_t now) const { return (int32_t)(now - next_us) >= 0; }
-  void advance(uint32_t now){ do { next_us += period_us; } while ((int32_t)(now - next_us) >= 0); }
+  uint32_t advance(uint32_t now){ 
+    do { next_us += period_us; } while ((int32_t)(now - next_us) >= 0); 
+    uint32_t dt = now - last_fire_us;
+    last_fire_us = now;
+    return dt;
+  }
 };
 
 // Start small; increase Kp until it resists tilt crisply, then add a bit of Ki to kill residual bias.
@@ -54,9 +38,9 @@ Motors motors;
 Battery batt;
 WifiLink wifi;
 
-Periodic ctrlTick, telemTick;
+Periodic ctrlTick, telemTick, slowTelemTick;
 
-
+static bool wasStreaming = false;
 
 void setup() {
   motors.begin();
@@ -64,22 +48,38 @@ void setup() {
   imu.begin(cfg::PIN_CS, cfg::PIN_SCK, cfg::PIN_MISO, cfg::PIN_MOSI);
   batt.begin();
 
-  DBG_BEGIN(baud);
+  DBG_BEGIN(115200);
   DBG("AP IP: "); DBGLN(WiFi.softAPIP());
   DBGF("WHO_AM_I = 0x%02X\n", imu.whoAmI());
 
-  uint32_t t0 = micros();
-  ctrlTick.start(t0, 1000000u / cfg::TILT_CONTR_HZ);
-  telemTick.start(t0,1000000u / cfg::TELEMETRY_HZ );
 }
-
-
 
 void loop() {
   wifi.handle();
 
+  bool streaming = wifi.inStreaming();
+
+  if(streaming && !wasStreaming){
+    // streaming entry, start timers, reset estimator, and controler intergrator
+    uint32_t t0 = micros();
+    ctrlTick.start(t0, 1000000u / cfg::TILT_CONTR_HZ);
+    telemTick.start(t0,1000000u / cfg::TELEMETRY_HZ );
+    slowTelemTick.start(t0,1000000u / cfg::SLOWTELMETRY_HZ);
+    est.reset(0, 0);
+    ctrl.zeroIntegrators();
+  }
+
+  if (!streaming && wasStreaming) {
+    // streaming stoped, set motors 0
+    motors.writeRaw(0,0,0,0);
+  }
+
+  wasStreaming = streaming;
+
   // wait until streaming
-  if (!wifi.inStreaming()) { delay(10); return;}
+  if (!streaming) { delay(10); return; }
+
+  // Should be streaming
 
   // read rtc microseconds
   uint32_t nowUs = micros();
@@ -91,25 +91,12 @@ void loop() {
   }
 
   if (ctrlTick.due(nowUs)) {
-    ctrlTick.advance(nowUs);
+    uint32_t dt_us = ctrlTick.advance(nowUs);
+    float dt = (float)dt_us * 1e-6f;
+    if (dt <= 0.f) dt = 1.0f / cfg::TILT_CONTR_HZ;
 
     SI si;
     imu.readSI(si);
-
-    static bool first = true;
-    static uint32_t last = 0;
-    float dt;
-
-    if (first) {
-      // initialize on first run
-      last = nowUs;
-      dt = 1.0f / cfg::TILT_CONTR_HZ;
-      first = false;
-    } else {
-      dt = (nowUs - last) * 1e-6f;
-      if (dt <= 0) dt = 1.0f / cfg::TILT_CONTR_HZ;  // wrap safety
-      last = nowUs;
-    }
 
     est.update(si, dt);
 
@@ -123,22 +110,13 @@ void loop() {
     );
     motors.writeRaw(oFL, oFR, oBL, oBR);
   }
+
   if (telemTick.due(nowUs)) {
-    // uint16_t dt32 = nowUs - lastTxUs;
-    // if (dt32 > 65535u) dt32 = 65535u;
-    // uint16_t loop_us = (uint16_t) dt32;
-
-    // lastTxUs = nowUs;
-
-    // while ((int32_t)(nowUs - nextTxDueUs) >= 0){
-    //   nextTxDueUs += txPeriodUs;
-    // }
-
-    telemTick.advance(nowUs);
-
+    uint32_t dt_us = telemTick.advance(nowUs);
+    if (dt_us > 65535u) dt_us = 65535u;
+    uint16_t loop_us = (uint16_t)dt_us;
     uint8_t mot[4] = { oFL, oFR, oBL, oBR };
     uint16_t adc   = batt.readADC();
-    uint16_t loop_us = (uint16_t)min<uint32_t>(telemTick.period_us, 65535u);
     wifi.sendFastTelemetry(loop_us, adc, mot,
                             est.roll_deg(), est.pitch_deg(),est.gx_dps(),est.gy_dps());
 
@@ -146,7 +124,15 @@ void loop() {
       "loop_us=%u, adc=%u, mot=[%u,%u,%u,%u], roll=%.2f, pitch=%.2f, gx=%.2f, gy=%.2f\n",
       loop_us, adc,
       mot[0], mot[1], mot[2], mot[3],
-      roll_deg, pitch_deg, gx_dps, gy_dps
+      est.roll_deg(), est.pitch_deg(),est.gx_dps(),est.gy_dps()
       );
+  }
+
+  if(slowTelemTick.due(nowUs)){
+    uint16_t dt_us = slowTelemTick.advance(nowUs);
+    if (dt_us > 65535u) dt_us = 65535u;
+    uint16_t loop_us = (uint16_t) dt_us;
+    const float des_roll = 0.f, des_pitch = 0.f;
+    wifi.sendSlowTelemetry(loop_us, 0.f,0.f, ctrl.I_roll(), ctrl.I_pitch(), ctrl.U_roll(), ctrl.U_pitch());
   }
 }

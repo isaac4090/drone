@@ -14,8 +14,8 @@ void TiltController::update(float des_roll, float des_pitch,
   ir_ += er*dt; ip_ += ep*dt;
   clampIntegrators(50.0f);
 
-  float ur = gr_.Kp*er + gr_.Ki*ir_ - gr_.Kd*gx; 
-  float up = gp_.Kp*ep + gp_.Ki*ip_ - gp_.Kd*gy;
+  ur = gr_.Kp*er + gr_.Ki*ir_ - gr_.Kd*gx; 
+  up = gp_.Kp*ep + gp_.Ki*ip_ - gp_.Kd*gy;
 
   float FL = float(bFL) - up + ur;
   float FR = float(bFR) - up - ur;
