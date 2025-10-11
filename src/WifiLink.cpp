@@ -154,19 +154,16 @@ size_t WifiLink::sendFastTelemetry(uint16_t loop_us,
 
 size_t WifiLink::sendSlowTelemetry(uint16_t loop_us,
                                    float e_roll, float e_pitch,
-                                   float I_roll, float I_pitch,
                                    float u_r,    float u_p)
 {
   if (_state != STREAMING || !_client.connected()) return 0;
   DebugPkt p{};
   p.type          = 0xA3;
-  p.seq_be        = htobe16_u16(_txSeq++);           // reuse same tx seq
+  p.seq_be        = htobe16_u16(_txSeq++);
   p.loop_us_be    = htobe16_u16(loop_us);
 
   p.e_roll_c_be   = (int16_t)htobe16_u16((uint16_t)q(e_roll,  100.f));
   p.e_pitch_c_be  = (int16_t)htobe16_u16((uint16_t)q(e_pitch, 100.f));
-  p.I_roll_c_be   = (int16_t)htobe16_u16((uint16_t)q(I_roll,  100.f));
-  p.I_pitch_c_be  = (int16_t)htobe16_u16((uint16_t)q(I_pitch, 100.f));
   p.u_r_c_be      = (int16_t)htobe16_u16((uint16_t)q(u_r,     100.f));
   p.u_p_c_be      = (int16_t)htobe16_u16((uint16_t)q(u_p,     100.f));
 

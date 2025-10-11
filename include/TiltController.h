@@ -10,11 +10,10 @@ public:
 
   void zeroIntegrators() { ir_=0; ip_=0; }
   void clampIntegrators(float lim){ if(ir_>lim)ir_=lim; if(ir_<-lim)ir_=-lim; if(ip_>lim)ip_=lim; if(ip_<-lim)ip_=-lim; }
-
-  float I_roll() const { return ir_; }
-  float I_pitch() const { return ip_; }
   float U_roll() const { return ur; }
   float U_pitch() const { return up; }
+  float E_roll() const { return er;}
+  float E_pitch() const {return ep;}
   void update(float des_roll, float des_pitch,
               float m_roll, float m_pitch,
               float gx_dps, float gy_dps,
@@ -23,5 +22,5 @@ public:
               uint8_t& outFL, uint8_t& outFR, uint8_t& outBL, uint8_t& outBR);
 private:
   Gains gr_, gp_;
-  float ir_=0, ip_=0, ur = 0, up = 0;
+  float er=0, ep = 0, ir_=0, ip_=0, ur = 0, up = 0;
 };

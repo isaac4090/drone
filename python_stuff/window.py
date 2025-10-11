@@ -4,7 +4,7 @@ from PyQt6.QtNetwork import QAbstractSocket
 from .config import *
 from .net import NetClient
 from .telemetry import parse_frame,reset_banner_str
-from .widgets import TiltBall, BatteryIndicator, BarPair, KeyPill, triangle_widget
+from .widgets import TiltBall, BatteryIndicator, BarPair, KeyPill, triangle_widget, TelemetryWindow, GraphsPanel3x2
 
 class DroneWindow(QtWidgets.QMainWindow):
     def __init__(self, debug:bool = False, no_drone:bool = False):
@@ -20,9 +20,16 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.stopToggle = False
         self.flyKeyboardToggle = False
         self.pressed = set()
-        self._latest = None
+        self._latestFast = None
+        self._latestGraph = None
 
         self.switch_is_on = None 
+
+        self._graphs_win: TelemetryWindow | None = None
+        self._t_fast_sec = 0.0
+        self._t_slow_sec = 0.0   
+
+
          
 
         # ---- Net
@@ -49,13 +56,14 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.btnConnect     = big_button("Connect")
         self.btnDisconnect  = big_button("Disconnect")
         self.btnStartMotors = big_button("Reset ESC's")
+        self.btnCalibrateGyro = big_button("Calibrate gryo")
         self.btnStopMotors  = big_button("Motors disenabled — press to enable")
         self.btnFlyPS4      = big_button("Fly PS4")
         self.btnFlyKeyboard = big_button("Fly Keyboard")
 
         self._base_btn_style = self.btnStopMotors.styleSheet() 
 
-        for b in (self.btnConnect, self.btnDisconnect, self.btnStartMotors,
+        for b in (self.btnConnect, self.btnDisconnect, self.btnStartMotors, self.btnCalibrateGyro,
                   self.btnStopMotors, self.btnFlyPS4, self.btnFlyKeyboard):
             leftLayout.addWidget(b)
         leftLayout.addStretch(1)
@@ -75,12 +83,31 @@ class DroneWindow(QtWidgets.QMainWindow):
         overlayHBox.addWidget(wasdBox,1); overlayHBox.addWidget(arrowsBox,1)
         leftLayout.addWidget(self.kbOverlay); leftLayout.addStretch(1)
 
-        # right column (tilt ball + motor I/O)
+        # right column (tilt ball + graphs in one row, then motor I/O below)
         right = QtWidgets.QFrame(); right.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         rightLayout = QtWidgets.QVBoxLayout(right); rightLayout.setContentsMargins(16,16,16,16)
-        self.tiltBall = TiltBall(diameter=500)
-        rightLayout.addWidget(self.tiltBall, 0, QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignRight)
+        rightLayout.setSpacing(10)
 
+        # --- top row: [ graphsPanel | tiltBall ] ---
+        topRow = QtWidgets.QHBoxLayout()
+        topRow.setContentsMargins(0,0,0,0)
+        topRow.setSpacing(10)
+
+        # graphs on the left
+        self.graphsPanel = GraphsPanel3x2(history_secs=20.0, refresh_hz=30, parent=self)
+        self.graphsPanel.requestFullscreen.connect(self._open_graphs)
+
+
+        topRow.addWidget(self.graphsPanel, 1)
+
+        # ball on the right (fixed size), top-aligned
+        self.tiltBall = TiltBall(diameter=500)
+        topRow.addWidget(self.tiltBall, 0, QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignRight)
+
+        # add top row to right column
+        rightLayout.addLayout(topRow, 0)
+
+        # --- motor I/O below, takes remaining vertical space ---
         ioBox = QtWidgets.QGroupBox("Motor I/O"); ioGrid = QtWidgets.QGridLayout(ioBox)
         ioGrid.setContentsMargins(0,10,10,10); ioGrid.setHorizontalSpacing(18); ioGrid.setVerticalSpacing(8)
 
@@ -115,6 +142,7 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.btnConnect.clicked.connect(lambda: self._connect(HOST_DEFAULT, PORT_DEFAULT))
         self.btnDisconnect.clicked.connect(self._disconnect)
         self.btnStartMotors.clicked.connect(self._start_motors)
+        self.btnCalibrateGyro.clicked.connect(self._open_graphs)
         self.btnStopMotors.clicked.connect(self._stop_toggle)
         self.btnFlyKeyboard.clicked.connect(self._fly_keyboard_toggle)
 
@@ -148,6 +176,7 @@ class DroneWindow(QtWidgets.QMainWindow):
 
         # periodic UI refresh (decoupled from socket rate)
         self.uiTimer = QtCore.QTimer(self); self.uiTimer.setInterval(int(1000/UI_FPS))
+
         self.uiTimer.timeout.connect(self._pump_ui); self.uiTimer.start()
 
     # ---- Net handlers ----
@@ -279,18 +308,92 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.btnConnect.setEnabled(True)
 
     def _on_frame(self, frame: bytes):
-        self._latest = parse_frame(frame,self.debug and not self.noDrone, self.debugADCValues)
+        out = parse_frame(frame,self.debug and not self.noDrone, self.debugADCValues)
+        if not out:
+            return
+        ptype = out.get('type')
+        if ptype == PKT_ANGLES:
+            self._latestFast = out
+            self._update_main_ui_from_fast(out)
+            dt_sec = float(out.get("loop_us", 0)) / 1_000_000.0
+            if not (0.0 < dt_sec < 0.5):
+                print("odd time value")
+                return
+            self._t_fast_sec += dt_sec
+            
+            self.graphsPanel.append_fast(
+                out.get("roll_deg", 0.0),
+                out.get("pitch_deg", 0.0),
+                out.get("gx_dps", 0.0),
+                out.get("gy_dps", 0.0),
+                out.get("motors", (0,0,0,0)),
+                out.get("batV", 0.0),
+                self.MotorPowers[MOTOR_ORDER[0]],
+                self._t_fast_sec,
+            )
 
-    # ---- UI periodic refresh ----
-    def _pump_ui(self):
-        if not self._latest: return
-        d = self._latest
+            if self._graphs_win is not None:
+                self._graphs_win.append_fast(
+                    out.get("roll_deg", 0.0),
+                    out.get("pitch_deg", 0.0),
+                    out.get("gx_dps", 0.0),
+                    out.get("gy_dps", 0.0),
+                    out.get("motors", (0,0,0,0)),
+                    out.get("batV", 0.0),
+                    self.MotorPowers[MOTOR_ORDER[0]],
+                    self._t_fast_sec,
+                )
+
+        elif ptype == PKT_DEBUG:
+            dt_sec = float(out.get("loop_us", 0)) / 1_000_000.0
+            if not (0.0 < dt_sec < 0.5):
+                print("odd time value")
+                return
+            self._t_slow_sec += dt_sec
+            self._latestGraph = out
+
+            
+            self.graphsPanel.append_sample(
+                out.get("e_roll", 0.0),
+                out.get("e_pitch", 0.0),
+                out.get("u_r", 0.0),
+                out.get("u_p", 0.0),
+                self._t_slow_sec,
+            )
+
+            if self._graphs_win is not None:
+                self._graphs_win.append_sample(
+                    out.get("e_roll", 0.0),
+                    out.get("e_pitch", 0.0),
+                    out.get("u_r", 0.0),
+                    out.get("u_p", 0.0),
+                    self._t_slow_sec,
+                )
+        else:
+            print(f'Unknow packet {out}')
+            return
+
+
+    def _update_main_ui_from_fast(self, d: dict):
+        # battery
         self.battery.set_voltage(d["batV"], cells=3)
+
+        # motors
         for name, val in zip(self.order, d["motors"]):
             self.rxLabels[name].setText(str(val))
             self.barPairs[name].setRX(val)
+
+        # tilt ball
         self.tiltBall.set_xy(d["x"], d["y"])
+
+        # safety gating
         self._update_esc_button_gate(d["batV"])
+
+    # ---- UI periodic refresh ----
+    def _pump_ui(self):
+        if not self._latestFast:
+            return
+        pass
 
     # ---- Motor send ----
     def _send_current_powers(self):
@@ -497,3 +600,12 @@ class DroneWindow(QtWidgets.QMainWindow):
                 v = self.MotorPowers[m] + delta*step
                 self.MotorPowers[m] = max(0, min(self.fullPower, v))
             self._send_current_powers()
+
+    def _open_graphs(self):
+        if self._graphs_win is None:
+            self._graphs_win = TelemetryWindow(history_secs=20.0, refresh_hz=30, parent=None)
+            # Ensure we clear the handle when user closes the window
+            self._graphs_win.destroyed.connect(lambda *_: setattr(self, "_graphs_win", None))
+        self._graphs_win.show()
+        self._graphs_win.raise_()
+        self._graphs_win.activateWindow()

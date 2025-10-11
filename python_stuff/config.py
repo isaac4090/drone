@@ -1,8 +1,8 @@
 # Protocol and timing
-MAX_BUF = 4096 # max wifi buffer lenght
+MAX_BUF = 400 # max wifi buffer lenght
 PKT_ANGLES = 0xA2
 PKT_DEBUG = 0xA3
-PKT_SIZES = {PKT_ANGLES: 20, PKT_DEBUG: 18}
+PKT_SIZES = {PKT_ANGLES: 20, PKT_DEBUG: 14}
 SEND_HZ = 30 # how often the motor powers are send computer -> drone
 UI_FPS = 30 # How often UI repaints last telemetry drome -> computer changes UI
 

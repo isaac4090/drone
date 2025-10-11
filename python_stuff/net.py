@@ -81,6 +81,7 @@ class NetClient(QtCore.QObject):
             if pLen is None:
                 # drop byte look at next
                 del self._rx[0:1]
+                continue
 
             if len(self._rx) < pLen:
                 break

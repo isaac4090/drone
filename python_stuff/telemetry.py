@@ -13,7 +13,6 @@ def xor8(b: bytes) -> int:
 def parse_frame(frame: bytes, debug:bool = False, ADCValue:int = None):
     """Return dict: batV, bat_adc, motors(tuple), x, y, imu14."""
 
-    # if run in debug mode. esp32 powered via usb or sperate supply, allow user set ADCVlaue
     if not frame:
         return None
     
@@ -21,32 +20,35 @@ def parse_frame(frame: bytes, debug:bool = False, ADCValue:int = None):
 
     if fType == PKT_ANGLES:
         out = parse_fast_frame(frame)
+        # if run in debug mode. esp32 powered via usb or sperate supply, allow user set voltage
+        if debug:
+            if 'batV' in out:
+                out['batV'] = ADCValue
 
     elif fType == PKT_DEBUG:
         out = parse_slow_frame(frame)
-    else:
-        out = {}
-
-
-    if debug:
-        if 'batV' in out:
-            out['batV'] = ADCValue
-
     return out
 
 def parse_slow_frame(pkt:bytes):
     (ptype, seq, loop_us,
      e_roll_c, e_pitch_c,
-     I_roll_c, I_pitch_c,
-     u_r_c, u_p_c, csum) = struct.unpack(">B H H h h h h h h B", pkt)
+     u_r_c, u_p_c, csum) = struct.unpack(">B H H h h h h B", pkt)
 
     recivedCsum = xor8(pkt[:-1])
     if recivedCsum != csum:
         print(f"checksum mismatch slow frame, from drone: {csum} from new calc: {recivedCsum}")
-        print(ptype, seq, loop_us,e_roll_c, e_pitch_c,I_roll_c, I_pitch_c,u_r_c, u_p_c, csum)
-        return {}
+        print(ptype, seq, loop_us,e_roll_c, e_pitch_c,u_r_c, u_p_c, csum)
+        return None
     
-    return {}
+    return {
+        "type": ptype,
+        "seq": seq,
+        "loop_us": loop_us,           # µs between slow frames
+        "e_roll":  e_roll_c  / 100.0, # deg
+        "e_pitch": e_pitch_c / 100.0, # deg
+        "u_r":     u_r_c     / 100.0, # control effort (roll)
+        "u_p":     u_p_c     / 100.0, # control effort (pitch)
+    }
     
 
 
@@ -61,7 +63,7 @@ def parse_fast_frame(pkt:bytes):
         print(ptype, seq, loop_us, bat_adc,
      m0, m1, m2, m3,
      roll_c, pitch_c, gx_c, gy_c, csum)
-        return {}
+        return None
     
     roll_deg  = roll_c  / 100.0
     pitch_deg = pitch_c / 100.0

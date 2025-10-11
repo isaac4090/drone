@@ -51,15 +51,13 @@ struct __attribute__((packed)) DebugPkt {
   uint16_t loop_us_be;     // dt between slow frames (BE)
   int16_t  e_roll_c_be;    // error roll *100 (BE)
   int16_t  e_pitch_c_be;   // error pitch *100 (BE)
-  int16_t  I_roll_c_be;    // integrator roll *100 (BE)
-  int16_t  I_pitch_c_be;   // integrator pitch *100 (BE)
   int16_t  u_r_c_be;       // control effort roll *100 (BE)
   int16_t  u_p_c_be;       // control effort pitch *100 (BE)
   uint8_t  csum;           // XOR over bytes [0..16]
 };
 
 static_assert(sizeof(AnglesPkt) == 20, "AnglesPkt must be 20 bytes");
-static_assert(sizeof(DebugPkt) == 18, "DebugPkt must be 18 bytes");
+static_assert(sizeof(DebugPkt) == 14, "DebugPkt must be 16 bytes");
 
 auto q = [](float v, float s)->int16_t {
   float f = v * s;
@@ -88,7 +86,7 @@ public:
   // Build and send a 0xA1 fast telemetry frame
   size_t sendFastTelemetry(uint16_t loop_us, uint16_t bat_adc, const uint8_t mot[4],float roll_deg, float pitch_deg,float gx_dps,  float gy_dps);
 
-  size_t sendSlowTelemetry(uint16_t loop_us, float e_roll, float e_pitch, float I_roll, float I_pitch, float u_r,float u_p);
+  size_t sendSlowTelemetry(uint16_t loop_us, float e_roll, float e_pitch, float u_r,float u_p);
                                      
   inline bool connected() { return _client.connected(); }
   inline bool inStreaming() { return _state == STREAMING && _client.connected(); }

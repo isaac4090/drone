@@ -133,6 +133,6 @@ void loop() {
     if (dt_us > 65535u) dt_us = 65535u;
     uint16_t loop_us = (uint16_t) dt_us;
     const float des_roll = 0.f, des_pitch = 0.f;
-    wifi.sendSlowTelemetry(loop_us, 0.f,0.f, ctrl.I_roll(), ctrl.I_pitch(), ctrl.U_roll(), ctrl.U_pitch());
+    wifi.sendSlowTelemetry(loop_us, ctrl.E_roll(),ctrl.E_pitch(), ctrl.U_roll(), ctrl.U_pitch());
   }
 }

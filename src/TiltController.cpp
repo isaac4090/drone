@@ -8,8 +8,8 @@ void TiltController::update(float des_roll, float des_pitch,
                             uint8_t bFL,uint8_t bFR,uint8_t bBL,uint8_t bBR,
                             uint8_t& oFL,uint8_t& oFR,uint8_t& oBL,uint8_t& oBR)
 {
-  float er = des_roll  - m_roll;
-  float ep = des_pitch - m_pitch;
+  er = des_roll  - m_roll;
+  ep = des_pitch - m_pitch;
 
   ir_ += er*dt; ip_ += ep*dt;
   clampIntegrators(50.0f);
