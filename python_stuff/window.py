@@ -29,6 +29,10 @@ class DroneWindow(QtWidgets.QMainWindow):
         self._t_fast_sec = 0.0
         self._t_slow_sec = 0.0   
 
+        self.des_roll_deg  = 0.0
+        self.des_pitch_deg = 0.0
+        self.max_tilt_deg  = 15.0
+
 
          
 
@@ -384,7 +388,8 @@ class DroneWindow(QtWidgets.QMainWindow):
             self.barPairs[name].setRX(val)
 
         # tilt ball
-        self.tiltBall.set_xy(d["x"], d["y"])
+        self.tiltBall.set_actual_deg(self._latestFast.get("roll_deg", 0.0),self._latestFast.get("pitch_deg", 0.0))
+        self.tiltBall.set_desired_deg(self.des_roll_deg, self.des_pitch_deg)
 
         # safety gating
         self._update_esc_button_gate(d["batV"])
@@ -570,16 +575,65 @@ class DroneWindow(QtWidgets.QMainWindow):
         t = ev.type()
         if t == QtCore.QEvent.Type.KeyPress and not ev.isAutoRepeat():
             k = ev.key()
-            if k == QtCore.Qt.Key.Key_Up:   self.hold_up = True;   self.holdTimer.start()
-            if k == QtCore.Qt.Key.Key_Down: self.hold_down = True; self.holdTimer.start()
-            self._set_key(k, True)
-        elif t == QtCore.QEvent.Type.KeyRelease and not ev.isAutoRepeat():
+
+            # ----- WASD: desired tilt while-held -----
+            if k in (QtCore.Qt.Key.Key_W, QtCore.Qt.Key.Key_A,
+                    QtCore.Qt.Key.Key_S, QtCore.Qt.Key.Key_D):
+                self.pressed.add(k)
+                self._recompute_des_from_keys()
+                self._set_key(k, True)  # pill UI (only shows if overlay visible)
+
+            # ----- Up/Down arrows: throttle hold ramp -----
+            if k == QtCore.Qt.Key.Key_Up:
+                self.hold_up = True
+                self.holdTimer.start()
+                self._set_key(k, True)
+            elif k == QtCore.Qt.Key.Key_Down:
+                self.hold_down = True
+                self.holdTimer.start()
+                self._set_key(k, True)
+
+        if t == QtCore.QEvent.Type.KeyRelease and not ev.isAutoRepeat():
             k = ev.key()
-            if k == QtCore.Qt.Key.Key_Up:   self.hold_up = False
-            if k == QtCore.Qt.Key.Key_Down: self.hold_down = False
-            if not self.hold_up and not self.hold_down: self.holdTimer.stop()
-            self._set_key(k, False)
+
+            # ----- WASD release -----
+            if k in (QtCore.Qt.Key.Key_W, QtCore.Qt.Key.Key_A,
+                    QtCore.Qt.Key.Key_S, QtCore.Qt.Key.Key_D):
+                self.pressed.discard(k)
+                self._recompute_des_from_keys()
+                self._set_key(k, False)
+
+            # ----- Up/Down arrows release -----
+            if k == QtCore.Qt.Key.Key_Up:
+                self.hold_up = False
+                if not self.hold_down:
+                    self.holdTimer.stop()
+                self._set_key(k, False)
+            elif k == QtCore.Qt.Key.Key_Down:
+                self.hold_down = False
+                if not self.hold_up:
+                    self.holdTimer.stop()
+                self._set_key(k, False)
+            return False
+
+        # When window loses focus, reset everything so nothing keeps “held”
+        if t == QtCore.QEvent.Type.WindowDeactivate:
+            self.pressed.clear()
+            self._recompute_des_from_keys()
+            self.hold_up = self.hold_down = False
+            self.holdTimer.stop()
         return False
+    
+    def _recompute_des_from_keys(self):
+        # +pitch when W, -pitch when S
+        pitch_cmd = (1 if QtCore.Qt.Key.Key_W in self.pressed else 0) \
+                - (1 if QtCore.Qt.Key.Key_S in self.pressed else 0)
+        # +roll when D, -roll when A
+        roll_cmd  = (1 if QtCore.Qt.Key.Key_D in self.pressed else 0) \
+                - (1 if QtCore.Qt.Key.Key_A in self.pressed else 0)
+
+        self.des_pitch_deg = float(pitch_cmd) * self.max_tilt_deg
+        self.des_roll_deg  = float(roll_cmd)  * self.max_tilt_deg
 
     def _set_key(self, key: int, down: bool):
         pill = {

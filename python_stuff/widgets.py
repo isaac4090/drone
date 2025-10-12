@@ -4,26 +4,51 @@ from collections import deque
 import math
 
 class TiltBall(QtWidgets.QWidget):
-    """Unit circle with a dot at (x,y) where x,y ∈ [-1,1]."""
-    def __init__(self, diameter=220, parent=None):
+    """Unit circle with two dots: actual and desired.
+       Degree-based full scale (edge of circle = full_scale_deg).
+    """
+    def __init__(self, diameter=220, parent=None, full_scale_deg=30.0):
         super().__init__(parent)
-        self._x = 0.0
-        self._y = 0.0
         self._pad = 12
         self.setFixedSize(diameter, diameter)
 
-    def set_xy(self, x: float, y: float):
-        # clamp to [-1,1]
-        x = max(-1.0, min(1.0, float(x)))
-        y = max(-1.0, min(1.0, float(y)))
-        if x != self._x or y != self._y:
-            self._x, self._y = x, y
+        # actual and desired in degrees (roll=x, pitch=y)
+        self._act_roll = 0.0
+        self._act_pitch = 0.0
+        self._des_roll = 0.0
+        self._des_pitch = 0.0
+
+        self._full_scale_deg = float(full_scale_deg)  # circle edge = ±full_scale_deg
+
+    # --- new degree-based API ---
+    def set_actual_deg(self, roll_deg: float, pitch_deg: float):
+        r = float(roll_deg); p = float(pitch_deg)
+        if r != self._act_roll or p != self._act_pitch:
+            self._act_roll, self._act_pitch = r, p
             self.update()
 
-    # optional: convenience from accelerometer in g's
+    def set_desired_deg(self, roll_deg: float, pitch_deg: float):
+        r = float(roll_deg); p = float(pitch_deg)
+        if r != self._des_roll or p != self._des_pitch:
+            self._des_roll, self._des_pitch = r, p
+            self.update()
+
+    def set_fullscale_deg(self, deg: float):
+        self._full_scale_deg = max(1.0, float(deg))
+        self.update()
+
     def set_from_g(self, ax_g: float, ay_g: float, az_g: float):
         g = (ax_g*ax_g + ay_g*ay_g + az_g*az_g) ** 0.5 or 1.0
-        self.set_xy(ax_g / g, ay_g / g)
+        x = ax_g / g
+        y = ay_g / g
+        self.set_xy(x, y)
+
+    def _deg_to_norm(self, roll_deg: float, pitch_deg: float) -> tuple[float, float]:
+        fs = self._full_scale_deg
+        # small-angle: normalize directly by full-scale degrees
+        x = max(-1.0, min(1.0, roll_deg / fs))
+        y = max(-1.0, min(1.0, pitch_deg / fs))
+        return x, y
 
     def paintEvent(self, ev):
         p = QtGui.QPainter(self)
@@ -37,39 +62,46 @@ class TiltBall(QtWidgets.QWidget):
         p.fillRect(self.rect(), QtGui.QColor("#ffffff"))
 
         # grid cross
-        pen_grid = QtGui.QPen(QtGui.QColor("#d0d0d0"), 1)
-        p.setPen(pen_grid)
+        p.setPen(QtGui.QPen(QtGui.QColor("#d0d0d0"), 1))
         p.drawLine(int(center.x()), r.top(), int(center.x()), r.bottom())
         p.drawLine(r.left(), int(center.y()), r.right(), int(center.y()))
 
         # unit circle
-        pen_circle = QtGui.QPen(QtGui.QColor("#888"), 2)
-        p.setPen(pen_circle)
+        p.setPen(QtGui.QPen(QtGui.QColor("#888"), 2))
         p.drawEllipse(center, radius, radius)
 
-        # ball
-        px = center.x() + self._x * radius
-        py = center.y() - self._y * radius  # invert Y for screen coords
-        dot_r = 8
-        p.setBrush(QtGui.QBrush(QtGui.QColor("#2e8b57")))
-        p.setPen(QtCore.Qt.PenStyle.NoPen)
-        p.drawEllipse(QtCore.QPointF(px, py), dot_r, dot_r)
-
-        # axis ticks (optional)
+        # ticks (±full-scale and mid)
         p.setPen(QtGui.QPen(QtGui.QColor("#bbb"), 1))
-        for t in (-0.5, 0.5):
+        for t in (-0.5, 0.0, 0.5):
+            # vertical tick positions
             p.drawLine(int(center.x() + t*radius), int(center.y()-4),
                        int(center.x() + t*radius), int(center.y()+4))
             p.drawLine(int(center.x()-4), int(center.y() - t*radius),
                        int(center.x()+4), int(center.y() - t*radius))
 
-        # text
+        # desired dot (orange)
+        dx, dy = self._deg_to_norm(self._des_roll, self._des_pitch)
+        p.setBrush(QtGui.QBrush(QtGui.QColor("#ff7f0e")))
+        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        px = center.x() + dx * radius
+        py = center.y() - dy * radius
+        p.drawEllipse(QtCore.QPointF(px, py), 8, 8)
+
+        # actual dot (green)
+        ax, ay = self._deg_to_norm(self._act_roll, self._act_pitch)
+        p.setBrush(QtGui.QBrush(QtGui.QColor("#2e8b57")))
+        px = center.x() + ax * radius
+        py = center.y() - ay * radius
+        p.drawEllipse(QtCore.QPointF(px, py), 8, 8)
+
+        # legend text
         p.setPen(QtGui.QPen(QtGui.QColor("#666")))
+        fs = self._full_scale_deg
         p.drawText(self.rect().adjusted(4, 4, -4, -4),
                    QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft,
-                   f"x={self._x:+.2f}  y={self._y:+.2f}")
+                   f"Actual: roll={self._act_roll:+.1f}°, pitch={self._act_pitch:+.1f}°\n"
+                   f"Desired: roll={self._des_roll:+.1f}°, pitch={self._des_pitch:+.1f}°  (FS={fs:.0f}°)")
         p.end()
-
 
 class KeyPill(QtWidgets.QLabel):
     def __init__(self, text: str, parent=None):
