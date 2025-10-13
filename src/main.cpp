@@ -10,9 +10,9 @@
 #include "AttitudeEstimator.h"
 #include "TiltController.h"
 
-uint8_t mFL = 0, mFR = 0, mBL = 0, mBR = 0;
 uint8_t oFL = 0, oFR = 0, oBL = 0, oBR = 0;
 
+static CmdState cmd;
 
 struct Periodic {
   uint32_t next_us=0, period_us=0,last_fire_us = 0;
@@ -26,7 +26,6 @@ struct Periodic {
   }
 };
 
-// Start small; increase Kp until it resists tilt crisply, then add a bit of Ki to kill residual bias.
 static float Kp_roll  = 0.12f, Ki_roll  = 0.02f, Kd_roll  = 0.0015f;
 static float Kp_pitch = 0.12f, Ki_pitch = 0.02f, Kd_pitch = 0.0015f;
 
@@ -84,11 +83,8 @@ void loop() {
   // read rtc microseconds
   uint32_t nowUs = micros();
 
-  // read motor commands
-  uint8_t cmd[4];
-  while (wifi.readCmd4(cmd)) {
-    mFL = cmd[0]; mFR = cmd[1]; mBL = cmd[2]; mBR = cmd[3];
-  }
+  wifi.pollCommands(cmd);
+
 
   if (ctrlTick.due(nowUs)) {
     uint32_t dt_us = ctrlTick.advance(nowUs);
@@ -99,16 +95,23 @@ void loop() {
     imu.readSI(si);
 
     est.update(si, dt);
+    
+    if (cmd.mode == 0){
+      oFL = 0; oFR=0; oBL =0; oBR = 0;
+      motors.writeRaw(oFL, oFR, oBL, oBR);
+      ctrl.zeroIntegrators();
+    } else{
 
-    ctrl.update(
-      0.0f, 0.0f,                  
-      est.roll_deg(), est.pitch_deg(),
-      est.gx_dps(), est.gy_dps(),
-      dt,
-      mFL, mFR, mBL, mBR,
-      oFL, oFR, oBL, oBR
-    );
-    motors.writeRaw(oFL, oFR, oBL, oBR);
+      ctrl.update(
+        cmd.des_roll, cmd.des_pitch,                  
+        est.roll_deg(), est.pitch_deg(),
+        est.gx_dps(), est.gy_dps(),
+        dt,
+        cmd.base, cmd.base, cmd.base, cmd.base,
+        oFL, oFR, oBL, oBR
+      );
+      motors.writeRaw(oFL, oFR, oBL, oBR);
+    }
   }
 
   if (telemTick.due(nowUs)) {

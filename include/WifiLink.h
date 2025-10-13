@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_system.h>
+#include "config.h"
 
 static constexpr uint8_t PKT_FAST = 0xA1;
 static constexpr uint8_t PKT_ANGLES = 0xA2;
@@ -56,8 +57,18 @@ struct __attribute__((packed)) DebugPkt {
   uint8_t  csum;           // XOR over bytes [0..16]
 };
 
+struct __attribute__((packed)) CmdPkt {
+  uint8_t magic;        // 0xC1 (helps re-sync in case of byte loss)
+  uint8_t seq;          // increments each send (wrap OK)
+  uint8_t mode;         // 0 = STOP, 1 = FLY (future: bitflags)
+  uint8_t base;         // baseline motor power 0..255 (your "throttle")
+  int8_t  roll_c;       // desired roll  [deg * 2]  => 0.5°/LSB
+  int8_t  pitch_c;      // desired pitch [deg * 2]  => 0.5°/LSB
+  uint8_t csum;         // XOR of bytes [0..5]
+};
 static_assert(sizeof(AnglesPkt) == 20, "AnglesPkt must be 20 bytes");
 static_assert(sizeof(DebugPkt) == 14, "DebugPkt must be 16 bytes");
+static_assert(sizeof(CmdPkt) == 7, "CmdPkt must be 7 bytes");
 
 auto q = [](float v, float s)->int16_t {
   float f = v * s;
@@ -66,6 +77,7 @@ auto q = [](float v, float s)->int16_t {
   return (int16_t)f;
 };
 
+static inline float deq_deg_05(int8_t q){ return (float)q * 0.5f; }
 
 class WifiLink {
 public:
@@ -87,6 +99,9 @@ public:
   size_t sendFastTelemetry(uint16_t loop_us, uint16_t bat_adc, const uint8_t mot[4],float roll_deg, float pitch_deg,float gx_dps,  float gy_dps);
 
   size_t sendSlowTelemetry(uint16_t loop_us, float e_roll, float e_pitch, float u_r,float u_p);
+
+  bool readCmd7(CmdPkt& out);
+  void pollCommands(struct CmdState& out);
                                      
   inline bool connected() { return _client.connected(); }
   inline bool inStreaming() { return _state == STREAMING && _client.connected(); }

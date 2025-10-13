@@ -3,7 +3,7 @@ from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtNetwork import QAbstractSocket
 from .config import *
 from .net import NetClient
-from .telemetry import parse_frame,reset_banner_str
+from .telemetry import parse_frame,reset_banner_str, build_cmd
 from .widgets import TiltBall, BatteryIndicator, BarPair, KeyPill, triangle_widget, TelemetryWindow, GraphsPanel3x2
 
 class DroneWindow(QtWidgets.QMainWindow):
@@ -15,6 +15,7 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.debugFirstConnectPush = True
         self.setWindowTitle("Drone")
         self.MotorPowers = {n:0 for n in MOTOR_ORDER}
+        self.basePower = 0
         self.step = STEP
         self.fullPower = FULL_POWER
         self.stopToggle = False
@@ -285,7 +286,7 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.btnDisconnect.setEnabled(True)
         # start motor send timer
         self._sendTimer = QtCore.QTimer(self); self._sendTimer.setInterval(int(1000/SEND_HZ))
-        self._sendTimer.timeout.connect(self._send_current_powers); self._sendTimer.start()
+        self._sendTimer.timeout.connect(self._send_current_cmd); self._sendTimer.start()
         
         if not self.stopToggle:
             self._stop_toggle() # once connected motors will be in an off state
@@ -332,7 +333,7 @@ class DroneWindow(QtWidgets.QMainWindow):
                 out.get("gy_dps", 0.0),
                 out.get("motors", (0,0,0,0)),
                 out.get("batV", 0.0),
-                self.MotorPowers[MOTOR_ORDER[0]],
+                self.basePower,
                 self._t_fast_sec,
             )
 
@@ -344,7 +345,7 @@ class DroneWindow(QtWidgets.QMainWindow):
                     out.get("gy_dps", 0.0),
                     out.get("motors", (0,0,0,0)),
                     out.get("batV", 0.0),
-                    self.MotorPowers[MOTOR_ORDER[0]],
+                    self.basePower,
                     self._t_fast_sec,
                 )
 
@@ -408,6 +409,23 @@ class DroneWindow(QtWidgets.QMainWindow):
             self.txLabels[name].setText(str(val))
             self.barPairs[name].setTX(val)
 
+    def _send_current_cmd(self):
+        seq = getattr(self, "_tx_seq", 0)
+        self._tx_seq = (seq + 1) & 0xFF
+
+        mode = MODE_FLY if (not self.stopToggle and self.switch_is_on and self._is_connected()) else MODE_STOP
+
+        # build + send
+        pkt = build_cmd(seq, mode, self.basePower, self.des_roll_deg, self.des_pitch_deg)
+
+        if not self.noDrone:
+            self.net.sendCMD(pkt)
+
+        for name in self.order:
+            self.txLabels[name].setText(str(self.basePower))
+            self.barPairs[name].setTX(self.basePower)
+
+
     def _wait_ms(self, ms: int):
         loop = QtCore.QEventLoop()
         QtCore.QTimer.singleShot(ms, loop.quit)
@@ -445,9 +463,8 @@ class DroneWindow(QtWidgets.QMainWindow):
             self._wait_ms(10)
 
         def send(pwr):
-            for m in self.MotorPowers:
-                self.MotorPowers[m] = pwr
-            self._send_current_powers()
+            self.basePower = pwr
+            self._send_current_cmd()
 
         self.switch_is_on
 
@@ -542,9 +559,8 @@ class DroneWindow(QtWidgets.QMainWindow):
     def _stop_toggle(self):
         self.stopToggle = not self.stopToggle
         if self.stopToggle or not self.switch_is_on:
-            for m in self.MotorPowers: 
-                self.MotorPowers[m] = 0
-            self._send_current_powers()
+            self.basePower = 0
+            self._send_current_cmd()
             if not self.switch_is_on:
                 self.btnStopMotors.setText("Motors disenabled — Switch is off")
                 self.stopToggle = True
@@ -650,10 +666,9 @@ class DroneWindow(QtWidgets.QMainWindow):
         step = self.step*4 if (mods & QtCore.Qt.KeyboardModifier.ShiftModifier) else self.step
         delta = (1 if self.hold_up else 0) - (1 if self.hold_down else 0)
         if delta:
-            for m in self.MotorPowers:
-                v = self.MotorPowers[m] + delta*step
-                self.MotorPowers[m] = max(0, min(self.fullPower, v))
-            self._send_current_powers()
+            v = self.basePower + delta*step
+            self.basePower = max(0, min(self.fullPower, v))
+            self._send_current_cmd()
 
     def _open_graphs(self):
         if self._graphs_win is None:

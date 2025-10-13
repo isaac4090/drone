@@ -36,6 +36,12 @@ class NetClient(QtCore.QObject):
             return
         self.s.write(bytes([fl & 0xFF, fr & 0xFF, bl & 0xFF, br & 0xFF]))
 
+    def sendCMD(self, payload:bytes) -> None:
+        if hasattr(self, "s") and self.s.state() == QAbstractSocket.SocketState.ConnectedState:
+            self.s.write(payload)
+
+    
+
     def start_banner_detection(self, timeout_ms: int = 1000):
         self._expect_banner = True
         self.s.write(b"HELLO\n")

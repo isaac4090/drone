@@ -1,5 +1,5 @@
 import math, struct
-from .config import A_SENS, VBAT_RATIO, RESET_EXPLAIN, PKT_ANGLES, PKT_DEBUG
+from .config import *
 
 
 
@@ -90,8 +90,25 @@ def parse_fast_frame(pkt:bytes):
         "y": y,
     }
 
+def q_deg_05(deg: float) -> int:
+    # 0.5° per LSB, clamped to int8
+    s = int(round(deg * 2.0))
+    if s > 127: s = 127
+    if s < -128: s = -128
+    return s  
 
-    
+def build_cmd(seq: int, mode: int, base: int, roll_deg: float, pitch_deg: float) -> bytes:
+    roll_q  = q_deg_05(roll_deg)
+    pitch_q = q_deg_05(pitch_deg)
+    hdr = struct.pack(">BBBBbb",
+                      CMD_MAGIC,
+                      seq & 0xFF,
+                      mode & 0xFF,
+                      max(0, min(255, int(base))),
+                      roll_q,          # signed
+                      pitch_q)         # signed
+    csum = xor8(hdr)
+    return hdr + bytes([csum])
 
     
 

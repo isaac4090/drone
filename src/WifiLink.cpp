@@ -170,3 +170,36 @@ size_t WifiLink::sendSlowTelemetry(uint16_t loop_us,
   p.csum = xor8_sum(reinterpret_cast<const uint8_t*>(&p), sizeof(p) - 1);
   return writeTelemetry(reinterpret_cast<const uint8_t*>(&p), sizeof(p));
 }
+
+bool WifiLink::readCmd7(CmdPkt& out) {
+  // Try to re-sync to magic byte 0xC1
+  while (_client.connected() && _client.available() > 0) {
+    int b = _client.peek();
+    if (b == 0xC1) break;
+    (void)_client.read();  // discard one byte
+  }
+  if (_client.available() < (int)sizeof(CmdPkt)) return false;
+
+  uint8_t buf[sizeof(CmdPkt)];
+  size_t got = _client.read(buf, sizeof(CmdPkt));
+  if (got != sizeof(CmdPkt)) return false;
+
+  if (buf[0] != 0xC1) return false;  // should not happen,, but check anyway
+  uint8_t want = xor8_sum(buf, sizeof(CmdPkt)-1);
+  if (want != buf[sizeof(CmdPkt)-1]) return false; //cehck same xor sum
+
+  memcpy(&out, buf, sizeof(CmdPkt));
+  return true;
+}
+
+void WifiLink::pollCommands(struct CmdState& out) {
+  CmdPkt p;
+  while (readCmd7(p)) {
+    out.mode          = p.mode;
+    out.base          = p.base;
+    out.des_roll  = deq_deg_05(p.roll_c);
+    out.des_pitch = deq_deg_05(p.pitch_c);
+    out.last_seq      = p.seq;
+    out.last_us       = micros();
+  }
+}
