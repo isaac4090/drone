@@ -55,7 +55,7 @@ namespace cfg {
 }
 
 struct CmdState {
-  uint8_t mode = 0;     // 0=STOP, 1=FLY
+  uint8_t mode = 0;     // 0=STOP, 1=FLY, 2 = set gyro level
   uint8_t base = 0;     // 0..255
   float   des_roll  = 0;  // degrees
   float   des_pitch = 0;  // degrees

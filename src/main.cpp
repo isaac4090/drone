@@ -40,6 +40,7 @@ WifiLink wifi;
 Periodic ctrlTick, telemTick, slowTelemTick;
 
 static bool wasStreaming = false;
+static bool cal_armed = false;
 
 void setup() {
   motors.begin();
@@ -95,13 +96,22 @@ void loop() {
     imu.readSI(si);
 
     est.update(si, dt);
-    
+
     if (cmd.mode == 0){
       oFL = 0; oFR=0; oBL =0; oBR = 0;
       motors.writeRaw(oFL, oFR, oBL, oBR);
       ctrl.zeroIntegrators();
-    } else{
-
+      cal_armed = false;
+    } else if (cmd.mode == 2)
+    {
+      oFL = 0; oFR=0; oBL =0; oBR = 0;
+      motors.writeRaw(oFL, oFR, oBL, oBR);
+      ctrl.zeroIntegrators();
+      if (!cal_armed && !est.isLevelCalRunning()) {
+        est.startLevelCal(1500);   
+        cal_armed = true;
+      }
+    }else{
       ctrl.update(
         cmd.des_roll, cmd.des_pitch,                  
         est.roll_deg(), est.pitch_deg(),

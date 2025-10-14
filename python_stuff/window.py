@@ -19,6 +19,7 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.step = STEP
         self.fullPower = FULL_POWER
         self.stopToggle = False
+        self.calibrateGyroToggle = False
         self.flyKeyboardToggle = False
         self.pressed = set()
         self._latestFast = None
@@ -147,7 +148,7 @@ class DroneWindow(QtWidgets.QMainWindow):
         self.btnConnect.clicked.connect(lambda: self._connect(HOST_DEFAULT, PORT_DEFAULT))
         self.btnDisconnect.clicked.connect(self._disconnect)
         self.btnStartMotors.clicked.connect(self._start_motors)
-        self.btnCalibrateGyro.clicked.connect(self._open_graphs)
+        self.btnCalibrateGyro.clicked.connect(self._calibrate_gyro)
         self.btnStopMotors.clicked.connect(self._stop_toggle)
         self.btnFlyKeyboard.clicked.connect(self._fly_keyboard_toggle)
 
@@ -414,6 +415,8 @@ class DroneWindow(QtWidgets.QMainWindow):
         self._tx_seq = (seq + 1) & 0xFF
 
         mode = MODE_FLY if (not self.stopToggle and self.switch_is_on and self._is_connected()) else MODE_STOP
+        if (not self.switch_is_on and self.calibrateGyroToggle):
+            mode = MODE_CAL_GYRO
 
         # build + send
         pkt = build_cmd(seq, mode, self.basePower, self.des_roll_deg, self.des_pitch_deg)
@@ -678,3 +681,7 @@ class DroneWindow(QtWidgets.QMainWindow):
         self._graphs_win.show()
         self._graphs_win.raise_()
         self._graphs_win.activateWindow()
+
+    def _calibrate_gyro(self):
+        self.calibrateGyroToggle = not self.calibrateGyroToggle
+        print(self.calibrateGyroToggle)

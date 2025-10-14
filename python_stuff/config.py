@@ -5,6 +5,7 @@ PKT_DEBUG = 0xA3
 CMD_MAGIC = 0xC1 # send pkt magic byte/ identity
 MODE_STOP = 0
 MODE_FLY  = 1
+MODE_CAL_GYRO = 2
 PKT_SIZES = {PKT_ANGLES: 20, PKT_DEBUG: 14}
 SEND_HZ = 30 # how often the motor powers are send computer -> drone
 UI_FPS = 30 # How often UI repaints last telemetry drome -> computer changes UI
